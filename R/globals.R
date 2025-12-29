@@ -18,7 +18,12 @@ utils::globalVariables(c(
 "lag_1", "lag_7", "pct_change_1", "pct_change_7", "momentum_7",
 
 # Analysis columns
-"avg_streams",
+"avg_streams", "multiplier", "multiplier_smooth",
+
+# Year-over-year and seasonal columns
+"day", "date_last_year", "yoy_streams", "yoy_ratio",
+"is_christmas_season", "is_halloween_season", "is_summer",
+"is_year_end", "is_valentines", "n_years", "year",
 
 # Misc
 "."

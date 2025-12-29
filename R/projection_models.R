@@ -323,3 +323,119 @@ history |>
     multiplier = avg_streams / overall_mean
   )
 }
+
+#' Add year-over-year features
+#'
+#' Adds same-day-last-year comparisons and seasonal flags for modeling
+#' seasonal patterns like Christmas or Halloween songs.
+#'
+#' @param history tibble with date and streams columns
+#' @return tibble with yoy_streams, yoy_ratio, and seasonal flag columns
+#' @export
+#' @examples
+#' \dontrun{
+#' history <- load_track_history("53iuhJlwXhSER5J2IYYv1W")
+#' global <- aggregate_global_streams(history)
+#' with_yoy <- add_yoy_features(global)
+#' }
+add_yoy_features <- function(history) {
+  # Aggregate to global if per-country
+  if ("country" %in% names(history)) {
+    history <- aggregate_global_streams(history)
+  }
+
+  # Ensure sorted by date
+  history <- dplyr::arrange(history, date)
+
+  # Create lookup for same day last year
+  history <- history |>
+    dplyr::mutate(
+      date_last_year = date - lubridate::years(1),
+      day_of_year = lubridate::yday(date),
+      month = lubridate::month(date),
+      day = lubridate::mday(date)
+    )
+
+  # Self-join to get last year's streams for same day
+  last_year_lookup <- history |>
+    dplyr::select(date, streams) |>
+    dplyr::rename(yoy_streams = streams, date_last_year = date)
+
+  history <- history |>
+    dplyr::left_join(last_year_lookup, by = "date_last_year")
+
+  # Calculate year-over-year ratio
+  history <- history |>
+    dplyr::mutate(
+      yoy_ratio = dplyr::if_else(
+        !is.na(yoy_streams) & yoy_streams > 0,
+        streams / yoy_streams,
+        NA_real_
+      )
+    )
+
+  # Add seasonal flags
+  history <- history |>
+    dplyr::mutate(
+      # Christmas season: Dec 1 - Jan 7
+      is_christmas_season = (month == 12) | (month == 1 & day <= 7),
+      # Halloween: Oct 15 - Nov 1
+      is_halloween_season = (month == 10 & day >= 15) | (month == 11 & day == 1),
+      # Summer (Northern Hemisphere): Jun-Aug
+      is_summer = month %in% c(6, 7, 8),
+      # Year-end period: Dec 26 - Jan 2
+      is_year_end = (month == 12 & day >= 26) | (month == 1 & day <= 2),
+      # Valentine's Day period: Feb 7 - Feb 14
+      is_valentines = month == 2 & day >= 7 & day <= 14
+    )
+
+  # Clean up temporary columns
+  history <- history |>
+    dplyr::select(-date_last_year, -day)
+
+  history
+}
+
+#' Analyze seasonal patterns
+#'
+#' Calculates average stream patterns by day of year, useful for identifying
+#' seasonal songs (Christmas, Halloween, etc).
+#'
+#' @param history tibble with date and streams columns
+#' @param smooth Apply smoothing to patterns (default: TRUE)
+#' @param window Smoothing window in days (default: 7)
+#' @return tibble with day_of_year, avg_streams, multiplier
+#' @export
+analyze_seasonal_patterns <- function(history, smooth = TRUE, window = 7) {
+  if ("country" %in% names(history)) {
+    history <- aggregate_global_streams(history)
+  }
+
+  history$day_of_year <- lubridate::yday(history$date)
+  overall_mean <- mean(history$streams, na.rm = TRUE)
+
+  seasonal <- history |>
+    dplyr::group_by(day_of_year) |>
+    dplyr::summarise(
+      avg_streams = mean(streams, na.rm = TRUE),
+      n_years = dplyr::n_distinct(lubridate::year(date)),
+      n = dplyr::n(),
+      .groups = "drop"
+    ) |>
+    dplyr::mutate(
+      multiplier = avg_streams / overall_mean
+    )
+
+  # Apply smoothing if requested
+ if (smooth && requireNamespace("slider", quietly = TRUE)) {
+    seasonal <- seasonal |>
+      dplyr::arrange(day_of_year) |>
+      dplyr::mutate(
+        multiplier_smooth = slider::slide_dbl(
+          multiplier, mean, .before = window %/% 2, .after = window %/% 2
+        )
+      )
+  }
+
+  seasonal
+}

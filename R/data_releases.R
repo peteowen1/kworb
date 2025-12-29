@@ -70,15 +70,23 @@ if (length(files) == 0) {
 message(sprintf("Uploading %d files to release '%s'...", length(files), tag))
 
 # Create release if it doesn't exist
+release_created <- FALSE
 tryCatch({
   piggyback::pb_release_create(repo = repo, tag = tag)
   message(sprintf("Created new release '%s'", tag))
+  release_created <- TRUE
 }, error = function(e) {
   # Release likely already exists
   if (!grepl("already exists", e$message, ignore.case = TRUE)) {
     message("Note: ", e$message)
   }
 })
+
+# Wait for GitHub to propagate new release
+if (release_created) {
+  message("Waiting for release to propagate...")
+  Sys.sleep(5)
+}
 
 # Upload files
 piggyback::pb_upload(
@@ -130,6 +138,152 @@ tryCatch({
   message("Could not list files: ", e$message)
   tibble::tibble()
 })
+}
+
+#' Load all chart data from GitHub Release
+#'
+#' Downloads and loads all chart CSV files from a release into a single tibble.
+#'
+#' @param repo Repository in "owner/repo" format
+#' @param tag Release tag (default: "data")
+#' @return tibble with all chart data combined
+#' @export
+#' @examples
+#' \dontrun{
+#' charts <- load_charts_from_release("peteowen1/kworb")
+#' }
+load_charts_from_release <- function(repo, tag = "data") {
+  # List files in release
+  files <- list_release_files(repo, tag)
+
+  if (nrow(files) == 0) {
+    message("No files found in release")
+    return(tibble::tibble())
+  }
+
+  # Filter to chart files (contain _daily_ or _weekly_ in filename)
+  # Piggyback strips directory structure, so we match on basename patterns
+  chart_files <- files[grepl("_daily_|_weekly_", files$file_name), ]
+
+  if (nrow(chart_files) == 0) {
+    message("No chart files found")
+    return(tibble::tibble())
+  }
+
+  message(sprintf("Loading %d chart files...", nrow(chart_files)))
+
+  # Download to temp directory and read
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE))
+
+  piggyback::pb_download(
+    file = chart_files$file_name,
+    repo = repo,
+    tag = tag,
+    dest = temp_dir
+  )
+
+  # Read all CSVs
+  csv_files <- list.files(temp_dir, pattern = "\\.csv$",
+                          recursive = TRUE, full.names = TRUE)
+
+  data_list <- lapply(csv_files, readr::read_csv, show_col_types = FALSE)
+  dplyr::bind_rows(data_list)
+}
+
+#' Load track history from GitHub Release
+#'
+#' Downloads and loads track history CSV files from a release.
+#'
+#' @param repo Repository in "owner/repo" format
+#' @param track_ids Character vector of track IDs to load, or "all" for all tracks
+#' @param tag Release tag (default: "data")
+#' @return tibble with track history data
+#' @export
+#' @examples
+#' \dontrun{
+#' # Load specific tracks
+#' history <- load_tracks_from_release("peteowen1/kworb",
+#'                                      c("53iuhJlwXhSER5J2IYYv1W"))
+#'
+#' # Load all tracks
+#' all_history <- load_tracks_from_release("peteowen1/kworb", "all")
+#' }
+load_tracks_from_release <- function(repo, track_ids = "all", tag = "data") {
+  # List files in release
+  files <- list_release_files(repo, tag)
+
+  if (nrow(files) == 0) {
+    message("No files found in release")
+    return(tibble::tibble())
+  }
+
+  # Filter to track files
+  # Track files are Spotify track IDs (22 char alphanumeric) + .csv
+  # Exclude chart files (which contain _daily_ or _weekly_)
+  track_files <- files[
+    grepl("^[A-Za-z0-9]{22}\\.csv$", files$file_name) &
+    !grepl("_daily_|_weekly_", files$file_name)
+  , ]
+
+  if (nrow(track_files) == 0) {
+    message("No track files found")
+    return(tibble::tibble())
+  }
+
+  # Filter to specific tracks if requested
+  if (!identical(track_ids, "all")) {
+    pattern <- paste0("^(", paste(track_ids, collapse = "|"), ")\\.csv$")
+    track_files <- track_files[grepl(pattern, track_files$file_name), ]
+  }
+
+  if (nrow(track_files) == 0) {
+    message("No matching track files found")
+    return(tibble::tibble())
+  }
+
+  message(sprintf("Loading %d track files...", nrow(track_files)))
+
+  # Download to temp directory and read
+  temp_dir <- tempfile()
+  dir.create(temp_dir)
+  on.exit(unlink(temp_dir, recursive = TRUE))
+
+  piggyback::pb_download(
+    file = track_files$file_name,
+    repo = repo,
+    tag = tag,
+    dest = temp_dir
+  )
+
+  # Read all CSVs
+  csv_files <- list.files(temp_dir, pattern = "\\.csv$",
+                          recursive = TRUE, full.names = TRUE)
+
+  data_list <- lapply(csv_files, readr::read_csv, show_col_types = FALSE)
+  dplyr::bind_rows(data_list)
+}
+
+#' Load all data from GitHub Release
+#'
+#' Downloads and loads all data (charts and tracks) from a release.
+#'
+#' @param repo Repository in "owner/repo" format
+#' @param tag Release tag (default: "data")
+#' @return List with `charts` and `tracks` tibbles
+#' @export
+#' @examples
+#' \dontrun{
+#' data <- load_all_from_release("peteowen1/kworb")
+#' data$charts
+#' data$tracks
+#' }
+load_all_from_release <- function(repo, tag = "data") {
+  list(
+    charts = load_charts_from_release(repo, tag),
+    tracks = load_tracks_from_release(repo, "all", tag)
+  )
 }
 
 #' Delete files from GitHub Release

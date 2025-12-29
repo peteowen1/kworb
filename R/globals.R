@@ -26,5 +26,5 @@ utils::globalVariables(c(
 
 # Package-level constants
 .kworb_base_url <- "https://kworb.net/spotify/"
-.kworb_user_agent <- "kworb-r-package/0.1.0 (https://github.com/peteo/kworb)"
+.kworb_user_agent <- "kworb-r-package/0.1.0 (https://github.com/peteowen1/kworb)"
 .kworb_rate_limit_seconds <- 1

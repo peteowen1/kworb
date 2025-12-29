@@ -16,11 +16,10 @@ permissions:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - name: Checkout repository
@@ -37,36 +36,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcurl4-openssl-dev libxml2-dev
 
-      - name: Setup R dependencies
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: |
-            any::rvest
-            any::dplyr
-            any::tidyr
-            any::readr
-            any::httr
-            any::lubridate
-            any::purrr
-            any::tibble
-            any::jsonlite
-            any::rlang
-
-      - name: Install kworb package
+      - name: Install R packages
         run: |
-          install.packages("remotes")
+          install.packages(c("remotes", "piggyback"))
+          remotes::install_deps(dependencies = TRUE)
           remotes::install_local(".", dependencies = FALSE)
         shell: Rscript {0}
 
       - name: Download existing data
         run: |
           library(kworb)
+          repo <- Sys.getenv("GITHUB_REPOSITORY")
           tryCatch({
-            repo <- Sys.getenv("GITHUB_REPOSITORY")
-            download_latest_data(repo, "data")
-            message("Downloaded existing data")
+            download_release_data(repo, "data", tag = "data")
           }, error = function(e) {
-            message("No existing data to download: ", e$message)
+            message("No existing data: ", e$message)
           })
         shell: Rscript {0}
 
@@ -75,16 +59,9 @@ jobs:
           source("inst/scripts/daily_scrape.R")
         shell: Rscript {0}
 
-      - name: Create data release
+      - name: Upload data to release
         run: |
           library(kworb)
           repo <- Sys.getenv("GITHUB_REPOSITORY")
-          upload_data_release(repo, "data")
-        shell: Rscript {0}
-
-      - name: Cleanup old releases
-        run: |
-          library(kworb)
-          repo <- Sys.getenv("GITHUB_REPOSITORY")
-          delete_old_releases(repo, keep = 7)
+          upload_data_directory(repo, "data", tag = "data")
         shell: Rscript {0}

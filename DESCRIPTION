@@ -27,11 +27,12 @@ Imports:
     lubridate (>= 1.8.0),
     tibble (>= 3.0.0),
     purrr (>= 0.3.0),
-    jsonlite (>= 1.8.0)
+    piggyback (>= 0.1.5)
 Suggests:
     testthat (>= 3.0.0),
     slider,
-    mgcv
+    mgcv,
+    jsonlite
 Config/testthat/edition: 3
 URL: https://github.com/peteowen1/kworb
 BugReports: https://github.com/peteowen1/kworb/issues

@@ -14,10 +14,10 @@ dir.create(CHARTS_PATH, recursive = TRUE, showWarnings = FALSE)
 dir.create(TRACKS_PATH, recursive = TRUE, showWarnings = FALSE)
 
 # Timestamp for logging
-message(sprintf("Starting daily scrape at %s", Sys.time()))
+message(sprintf("\n=== Starting daily scrape at %s ===\n", Sys.time()))
 
 # 1. Scrape daily chart
-message("\n=== Scraping Global Daily Chart ===")
+message("=== Scraping Global Daily Chart ===")
 chart_data <- tryCatch({
   scrape_chart(country = "global", frequency = "daily")
 }, error = function(e) {
@@ -50,10 +50,7 @@ for (i in seq_along(track_ids)) {
   }
 
   result <- tryCatch({
-    # Check if we already have recent data for this track
-    existing <- load_track_history(track_id, path = TRACKS_PATH)
-
-    # Scrape new data
+    # Scrape daily history
     history <- scrape_track_history(track_id, view = "daily")
 
     if (nrow(history) > 0) {
@@ -88,15 +85,15 @@ if (length(failed_ids) > 0) {
 }
 
 # Save summary
-summary <- list(
-  scrape_date = Sys.Date(),
-  scrape_time = Sys.time(),
+summary_data <- list(
+  scrape_date = as.character(Sys.Date()),
+  scrape_time = as.character(Sys.time()),
   chart_tracks = nrow(chart_data),
   successful_tracks = successful,
   failed_tracks = failed
 )
 
 summary_file <- file.path(DATA_PATH, "last_scrape.json")
-jsonlite::write_json(summary, summary_file, auto_unbox = TRUE, pretty = TRUE)
+jsonlite::write_json(summary_data, summary_file, auto_unbox = TRUE, pretty = TRUE)
 
 message(sprintf("\nFinished at %s", Sys.time()))

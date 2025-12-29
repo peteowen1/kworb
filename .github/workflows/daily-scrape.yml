@@ -1,0 +1,86 @@
+name: Daily Spotify Chart Scrape
+
+on:
+  schedule:
+    # Run at 6:00 AM UTC daily (after Spotify updates)
+    - cron: '0 6 * * *'
+  workflow_dispatch:  # Allow manual triggers
+
+permissions:
+  contents: write
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libxml2-dev
+
+      - name: Setup R dependencies
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: |
+            any::rvest
+            any::dplyr
+            any::tidyr
+            any::readr
+            any::httr
+            any::lubridate
+            any::purrr
+            any::tibble
+            any::jsonlite
+            any::rlang
+
+      - name: Install kworb package
+        run: |
+          install.packages("remotes")
+          remotes::install_local(".", dependencies = FALSE)
+        shell: Rscript {0}
+
+      - name: Download existing data
+        run: |
+          library(kworb)
+          tryCatch({
+            repo <- Sys.getenv("GITHUB_REPOSITORY")
+            download_latest_data(repo, "data")
+            message("Downloaded existing data")
+          }, error = function(e) {
+            message("No existing data to download: ", e$message)
+          })
+        shell: Rscript {0}
+
+      - name: Run daily scrape
+        run: |
+          source("inst/scripts/daily_scrape.R")
+        shell: Rscript {0}
+
+      - name: Create data release
+        run: |
+          library(kworb)
+          repo <- Sys.getenv("GITHUB_REPOSITORY")
+          upload_data_release(repo, "data")
+        shell: Rscript {0}
+
+      - name: Cleanup old releases
+        run: |
+          library(kworb)
+          repo <- Sys.getenv("GITHUB_REPOSITORY")
+          delete_old_releases(repo, keep = 7)
+        shell: Rscript {0}

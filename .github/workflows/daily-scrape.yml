@@ -1,6 +1,10 @@
 name: Daily Spotify Chart Scrape
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/daily-scrape.yml'
   schedule:
     # Run at 6:00 AM UTC daily (after Spotify updates)
     - cron: '0 6 * * *'

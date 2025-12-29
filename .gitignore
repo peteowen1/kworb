@@ -2,6 +2,7 @@
 .Rhistory
 .RData
 .Ruserdata
+.claude/
 
 # Local data (stored in GitHub Releases instead)
 data/

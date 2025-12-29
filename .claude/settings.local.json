@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "WebFetch(domain:kworb.net)",
-      "Bash(Rscript:*)",
-      "Bash(where Rscript:*)"
-    ]
-  }
-}

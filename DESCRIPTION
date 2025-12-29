@@ -33,3 +33,5 @@ Suggests:
     slider,
     mgcv
 Config/testthat/edition: 3
+URL: https://github.com/peteowen1/kworb
+BugReports: https://github.com/peteowen1/kworb/issues

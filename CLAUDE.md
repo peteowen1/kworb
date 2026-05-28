@@ -69,3 +69,8 @@ predict_streams(model, horizon_days = 180)
 
 - Local store: configurable (defaults to project-local). Inspect with `get_storage_summary()`.
 - Releases: `peteowen1/kworb` GitHub releases (managed via `data_releases.R`).
+
+## CI / Operations
+
+- **Daily scrape workflow** (`.github/workflows/daily-scrape.yml`) runs at 06:00 UTC, scrapes ~200 tracks, then uploads to the `data` release tag via `upload_data_directory()`.
+- **`GITHUB_PAT` must be a real PAT** (`ghp_…`, `github_pat_…`, or 40 hex chars). The auto-issued `secrets.GITHUB_TOKEN` has a `ghs_` prefix that current `gh` R package versions reject in `validate_gh_pat()`, causing the upload step to fail with "Invalid GitHub PAT format". Use `secrets.WORKFLOW_PAT` (or a kworb-scoped fine-grained PAT). Symptom of regression: failed runs complete in ~7m at the upload step while successful runs take 25-30m.

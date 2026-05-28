@@ -19,7 +19,10 @@ jobs:
     timeout-minutes: 60
 
     env:
-      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      # gh::gh_token() validates PAT format; the auto-issued GITHUB_TOKEN
+      # has a ghs_ prefix which is rejected. Use a real PAT (ghp_) so
+      # piggyback uploads don't fail in validate_gh_pat().
+      GITHUB_PAT: ${{ secrets.WORKFLOW_PAT }}
 
     steps:
       - name: Checkout repository

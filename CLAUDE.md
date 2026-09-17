@@ -25,7 +25,7 @@ scrape_track_history(track_id)   → per-country daily stream history
   → predict_streams()            → apply
 ```
 
-33 exports across 9 R files.
+33 exports across 8 R files.
 
 ## Module Map
 

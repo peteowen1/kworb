@@ -97,3 +97,14 @@ summary_file <- file.path(DATA_PATH, "last_scrape.json")
 jsonlite::write_json(summary_data, summary_file, auto_unbox = TRUE, pretty = TRUE)
 
 message(sprintf("\nFinished at %s", Sys.time()))
+
+# Fail the run when the track scrape mostly failed, so the workflow goes red
+# and skips the upload step instead of publishing a stale or partial release.
+MAX_FAIL_RATE <- 0.2
+fail_rate <- if (length(track_ids) > 0) failed / length(track_ids) else 1
+if (successful == 0 || fail_rate > MAX_FAIL_RATE) {
+  stop(sprintf(
+    "Track scrape failed: %d of %d tracks succeeded, %d failed (%.1f%% > %.0f%% allowed, or none succeeded)",
+    successful, length(track_ids), failed, 100 * fail_rate, 100 * MAX_FAIL_RATE
+  ))
+}

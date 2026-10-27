@@ -88,13 +88,21 @@ if (release_created) {
   Sys.sleep(5)
 }
 
-# Upload files
-piggyback::pb_upload(
-  file = files,
-  repo = repo,
-  tag = tag,
-  overwrite = TRUE
-)
+# Upload files in chunks. One pb_upload() call over the whole directory (1,161
+# files on 2026-10-26) leaks cli's progress rawConnections until R hits its
+# 128-connection limit ("all 128 connections are in use"), killing the job
+# after every scrape had already succeeded. Close the leaked raw connections
+# between chunks so the count never builds up.
+chunks <- split(files, ceiling(seq_along(files) / 50))
+for (i in seq_along(chunks)) {
+  piggyback::pb_upload(
+    file = chunks[[i]],
+    repo = repo,
+    tag = tag,
+    overwrite = TRUE
+  )
+  close_raw_connections()
+}
 
 message("Upload complete")
 invisible(NULL)
@@ -305,4 +313,15 @@ for (file in files) {
   })
 }
 invisible(NULL)
+}
+
+# Close every open rawConnection. cli opens one per formatted progress message
+# and piggyback's upload loop does not always give them back.
+close_raw_connections <- function() {
+  cons <- getAllConnections()
+  for (id in cons[cons > 2]) {
+    con <- getConnection(id)
+    if (identical(summary(con)$class, "rawConnection")) close(con)
+  }
+  invisible(NULL)
 }

@@ -29,7 +29,7 @@ Imports:
     purrr (>= 0.3.0),
     piggyback (>= 0.1.5)
 Suggests:
-    testthat (>= 3.0.0),
+    testthat (>= 3.1.7),
     slider,
     mgcv,
     jsonlite,

@@ -148,6 +148,11 @@ tryCatch({
 })
 }
 
+# Release file names: chart files contain _daily_ or _weekly_; track files are a 22-character
+# Spotify track id + .csv. Piggyback strips directories, so these match on the base name.
+is_chart_file <- function(x) grepl("_daily_|_weekly_", x)
+is_track_file <- function(x) grepl("^[A-Za-z0-9]{22}\\.csv$", x) & !is_chart_file(x)
+
 #' Load all chart data from GitHub Release
 #'
 #' Downloads and loads all chart CSV files from a release into a single tibble.
@@ -171,7 +176,7 @@ load_charts_from_release <- function(repo, tag = "data") {
 
   # Filter to chart files (contain _daily_ or _weekly_ in filename)
   # Piggyback strips directory structure, so we match on basename patterns
-  chart_files <- files[grepl("_daily_|_weekly_", files$file_name), ]
+  chart_files <- files[is_chart_file(files$file_name), ]
 
   if (nrow(chart_files) == 0) {
     message("No chart files found")
@@ -230,10 +235,7 @@ load_tracks_from_release <- function(repo, track_ids = "all", tag = "data") {
   # Filter to track files
   # Track files are Spotify track IDs (22 char alphanumeric) + .csv
   # Exclude chart files (which contain _daily_ or _weekly_)
-  track_files <- files[
-    grepl("^[A-Za-z0-9]{22}\\.csv$", files$file_name) &
-    !grepl("_daily_|_weekly_", files$file_name)
-  , ]
+  track_files <- files[is_track_file(files$file_name), ]
 
   if (nrow(track_files) == 0) {
     message("No track files found")

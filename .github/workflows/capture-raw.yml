@@ -1,0 +1,61 @@
+name: Capture raw kworb pages
+
+# Stage 1 of docs/plans/kworb-db.md. Saves the 77 country daily charts,
+# global_daily_totals and artists.html exactly as received, and uploads one tar
+# plus manifest to a monthly release of the PRIVATE peteowen1/mediadata repo.
+
+on:
+  schedule:
+    # 21:30 UTC daily, shortly after kworb has published the day's charts
+    - cron: '30 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: capture-raw
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    # 80 requests x 3 s is about 4 minutes; allow for slow responses and setup
+    timeout-minutes: 25
+
+    env:
+      # Needs write access to peteowen1/mediadata (a repo-scoped PAT; the
+      # default GITHUB_TOKEN cannot reach another repository).
+      GH_TOKEN: ${{ secrets.WORKFLOW_PAT }}
+      MEDIADATA_REPO: peteowen1/mediadata
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Check the token can write to mediadata
+        run: |
+          perm=$(gh api "repos/$MEDIADATA_REPO" --jq '.permissions.push')
+          echo "push permission on $MEDIADATA_REPO: $perm"
+          test "$perm" = "true"
+
+      - name: Setup R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: 'release'
+          use-public-rspm: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcurl4-openssl-dev libxml2-dev
+
+      - name: Install R packages
+        run: |
+          install.packages("remotes")
+          remotes::install_deps(dependencies = TRUE)
+          remotes::install_local(".", dependencies = FALSE)
+        shell: Rscript {0}
+
+      - name: Capture and upload (fails on any failed page or upload)
+        run: Rscript inst/scripts/capture_raw.R

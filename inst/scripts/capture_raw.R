@@ -1,0 +1,131 @@
+#!/usr/bin/env Rscript
+# Stage 1 raw capture (docs/plans/kworb-db.md).
+#
+# Fetches the kworb index page, then the daily chart of every country the index
+# lists, global_daily_totals and artists.html. One request per page, 3 s apart,
+# bodies saved gzipped exactly as received. The day's files plus the manifest are
+# bundled into one tar and uploaded to a monthly release of the PRIVATE
+# peteowen1/mediadata repo (tag kworb-raw-YYYY-MM).
+#
+# Exits non-zero (after uploading whatever was captured) if any page failed, a
+# 429/403 stopped the run, or the upload could not be verified.
+#
+# Environment: GH_TOKEN (needs write access to the mediadata repo; `gh` CLI),
+# MEDIADATA_REPO (default peteowen1/mediadata), KWORB_DELAY (default 3),
+# KWORB_RAW_ROOT (default tempdir), KWORB_SKIP_UPLOAD=1 to only capture.
+
+suppressMessages(library(kworb))
+
+repo <- Sys.getenv("MEDIADATA_REPO", "peteowen1/mediadata")
+delay <- as.numeric(Sys.getenv("KWORB_DELAY", "3"))
+root <- Sys.getenv("KWORB_RAW_ROOT", file.path(tempdir(), "kworb_raw"))
+skip_upload <- nzchar(Sys.getenv("KWORB_SKIP_UPLOAD"))
+
+started <- Sys.time()
+run_ts <- format(started, "%Y%m%dT%H%M%SZ", tz = "UTC")
+tag <- paste0("kworb-raw-", format(started, "%Y-%m", tz = "UTC"))
+out_dir <- file.path(root, run_ts)
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+base <- "https://kworb.net/spotify/"
+
+problems <- character()
+note <- function(...) {
+  msg <- paste0(...)
+  message("PROBLEM: ", msg)
+  problems <<- c(problems, msg)
+}
+
+message(sprintf("Capture %s -> %s (delay %gs)", run_ts, out_dir, delay))
+
+# 1. Index page: the site's own country list (D12).
+idx <- fetch_raw_pages(paste0(base, "index_spotify.html"), out_dir, delay = delay)
+codes <- character()
+if (!isTRUE(attr(idx, "stopped")) && identical(as.integer(idx$http_status), 200L)) {
+  con <- gzfile(file.path(out_dir, idx$file), "rb")
+  html <- rawToChar(readBin(con, "raw", 5e7))
+  close(con)
+  codes <- parse_index_country_codes(html)
+  message("Index lists ", length(codes), " country daily charts")
+  if (length(codes) < 70) {
+    note("index page lists only ", length(codes), " countries (expected about 77); layout changed?")
+  }
+} else {
+  note("index page not fetched (status ", idx$http_status[1], ")")
+}
+
+# 2. Daily charts, totals, artists.
+urls <- c(
+  if (length(codes)) paste0(base, "country/", codes, "_daily.html"),
+  paste0(base, "country/global_daily_totals.html"),
+  paste0(base, "artists.html")
+)
+if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
+  man <- fetch_raw_pages(urls, out_dir, delay = delay)
+  if (isTRUE(attr(man, "stopped"))) {
+    note("stopped by HTTP 429/403; not attempted: ", length(attr(man, "not_attempted")), " pages")
+  }
+  bad <- man[is.na(man$http_status) | man$http_status != 200L, ]
+  for (i in seq_len(nrow(bad))) note(bad$url[i], " -> ", bad$error[i])
+  # The page must say the date we expect (within a day or two of today).
+  dated <- man[!is.na(man$page_date) & man$page_date != "", ]
+  age <- as.numeric(as.Date(format(started, "%Y-%m-%d", tz = "UTC")) - as.Date(dated$page_date))
+  stale <- dated$url[age < 0 | age > 4]
+  for (u in stale) note("page date out of expected range: ", u)
+}
+
+# 3. Bundle: files + manifest in one tar.
+manifest <- utils::read.csv(file.path(out_dir, "manifest.csv"), stringsAsFactors = FALSE)
+message(sprintf("%d requests, %d ok", nrow(manifest), sum(manifest$http_status %in% 200L)))
+if (length(codes) && nrow(manifest) != length(urls) + 1L) {
+  note("manifest has ", nrow(manifest), " rows, expected ", length(urls) + 1L)
+}
+tar_name <- paste0("kworb-raw-", run_ts, ".tar")
+man_name <- paste0("kworb-raw-manifest-", run_ts, ".csv")
+tar_path <- file.path(root, tar_name)
+man_path <- file.path(root, man_name)
+file.copy(file.path(out_dir, "manifest.csv"), man_path, overwrite = TRUE)
+rc <- system2("tar", c("-cf", shQuote(tar_path), "-C", shQuote(out_dir), "."))
+if (rc != 0 || !file.exists(tar_path)) note("tar failed")
+n_files <- length(list.files(out_dir, pattern = "\\.gz$"))
+message(sprintf("Bundle %s: %d page files, %.1f MB", tar_name, n_files,
+                file.size(tar_path) / 1e6))
+
+# 4. Upload and verify (always attempted, even after page failures).
+gh <- function(args) {
+  tmp <- tempfile()
+  rc <- system2("gh", args, stdout = tmp, stderr = tmp)
+  list(rc = rc, out = readLines(tmp, warn = FALSE))
+}
+if (skip_upload) {
+  message("KWORB_SKIP_UPLOAD set; not uploading")
+} else if (file.exists(tar_path)) {
+  if (gh(c("release", "view", tag, "-R", repo))$rc != 0) {
+    cr <- gh(c("release", "create", tag, "-R", repo, "--title", shQuote(tag),
+               "--notes", shQuote("Raw kworb.net page captures (private). One tar plus manifest per run."),
+               "--latest=false"))
+    if (cr$rc != 0 && gh(c("release", "view", tag, "-R", repo))$rc != 0) {
+      note("could not create release ", tag, ": ", paste(cr$out, collapse = " "))
+    }
+  }
+  up <- gh(c("release", "upload", tag, shQuote(tar_path), shQuote(man_path), "-R", repo))
+  if (up$rc != 0) note("upload failed: ", paste(up$out, collapse = " "))
+  chk <- gh(c("release", "view", tag, "-R", repo, "--json", "assets", "--jq",
+              shQuote(".assets[] | [.name, .size] | @tsv")))
+  listed <- if (chk$rc == 0) utils::read.delim(text = chk$out, header = FALSE,
+                                               col.names = c("name", "size")) else NULL
+  if (is.null(listed) || !all(c(tar_name, man_name) %in% listed$name)) {
+    note("uploaded assets not found on release ", tag)
+  } else if (listed$size[listed$name == tar_name] != file.size(tar_path)) {
+    note("uploaded tar size differs from local")
+  } else {
+    message(sprintf("Uploaded to https://github.com/%s/releases/tag/%s : %s (%.1f MB), %s",
+                    repo, tag, tar_name, file.size(tar_path) / 1e6, man_name))
+  }
+}
+
+if (length(problems)) {
+  message("\nCAPTURE FAILED with ", length(problems), " problem(s):")
+  for (p in problems) message(" - ", p)
+  quit(status = 1)
+}
+message("Capture OK: ", nrow(manifest), " requests, all 200")

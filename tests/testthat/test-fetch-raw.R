@@ -92,3 +92,7 @@ test_that("country codes come from the index page links", {
            <a href="country/us_daily.html">dup</a>'
   expect_equal(parse_index_country_codes(html), c("global", "us", "ad"))
 })
+
+test_that("the index URL (trailing slash) gets a non-empty slug", {
+  expect_equal(raw_slug("https://kworb.net/spotify/"), "index")
+})

@@ -24,7 +24,8 @@ raw_slug <- function(url) {
   s <- sub("^https?://[^/]+/", "", url)
   s <- sub("^spotify/", "", s)
   s <- sub("\\.[A-Za-z0-9]+$", "", s)
-  gsub("[^A-Za-z0-9_.-]+", "-", s)
+  s <- gsub("[^A-Za-z0-9_.-]+", "-", s)
+  if (!nzchar(s)) "index" else s
 }
 
 #' File name for a raw capture

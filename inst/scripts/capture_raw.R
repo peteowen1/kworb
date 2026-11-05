@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 # Stage 1 raw capture (docs/plans/kworb-db.md).
 #
-# Fetches the kworb index page, then the daily chart of every country the index
+# Fetches the kworb index page (https://kworb.net/spotify/), then the daily chart of every country the index
 # lists, global_daily_totals and artists.html. One request per page, 3 s apart,
 # bodies saved gzipped exactly as received. The day's files plus the manifest are
 # bundled into one tar and uploaded to a monthly release of the PRIVATE
@@ -38,7 +38,7 @@ note <- function(...) {
 message(sprintf("Capture %s -> %s (delay %gs)", run_ts, out_dir, delay))
 
 # 1. Index page: the site's own country list (D12).
-idx <- fetch_raw_pages(paste0(base, "index_spotify.html"), out_dir, delay = delay)
+idx <- fetch_raw_pages(paste0(base), out_dir, delay = delay)
 codes <- character()
 if (!isTRUE(attr(idx, "stopped")) && identical(as.integer(idx$http_status), 200L)) {
   con <- gzfile(file.path(out_dir, idx$file), "rb")

@@ -118,7 +118,9 @@ fetch_raw <- function(url, out_dir, user_agent = raw_user_agent(),
     writeBin(body, con)
     close(con)
     sha <- digest::digest(body, algo = "sha256", serialize = FALSE)
-    page_date <- parse_page_date(rawToChar(body[body != as.raw(0)]))
+    # saving never depends on parsing: a body the locale can't read gives no date, not a crash that loses the day's capture
+    page_date <- tryCatch(parse_page_date(iconv(rawToChar(body[body != as.raw(0)]), "UTF-8", "UTF-8", sub = "byte")),
+                          error = function(e) NA_character_)
   }
   err <- res$error
   if (!ok && is.na(err)) {

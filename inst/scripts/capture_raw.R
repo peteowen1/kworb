@@ -79,6 +79,10 @@ if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
   age <- as.numeric(as.Date(format(started, "%Y-%m-%d", tz = "UTC")) - as.Date(dated$page_date))
   stale <- dated$url[age < 0 | age > 4]
   for (u in stale) report(u, paste0("page date out of expected range: ", u))
+  # A 200 whose body has no page date where one belongs (a country chart or the totals page) is an error, challenge or changed
+  # layout, not data: only artists.html and the index legitimately carry none (review, 5 Nov)
+  undated <- man$url[man$http_status %in% 200L & (is.na(man$page_date) | man$page_date == "") & grepl("/country/|totals", man$url)]
+  for (u in undated) report(u, paste0("200 with no page date (error or changed page?): ", u))
 }
 
 # 3. Bundle: files + manifest in one tar.
@@ -136,4 +140,4 @@ if (length(problems)) {
   for (p in problems) message(" - ", p)
   quit(status = 1)
 }
-message("Capture OK: ", nrow(manifest), " requests, all 200")
+message("Capture OK: ", nrow(manifest), " requests, ", sum(manifest$http_status %in% 200L), " returned 200 (the rest are pages known dead on the site)")

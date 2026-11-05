@@ -35,6 +35,14 @@ note <- function(...) {
   problems <<- c(problems, msg)
 }
 
+# Pages that are dead on the site itself (seen 5 Nov 2026): ad has no page (404);
+# cy, mt and ru charts stopped updating (last dates 2017-08-05, 2019-12-25, 2022-04-07).
+# They are still captured and logged, but do not fail the run; any OTHER page does.
+known_dead <- paste0(base, "country/", c("ad", "cy", "mt", "ru"), "_daily.html")
+report <- function(url, msg) {
+  if (url %in% known_dead) message("known-dead page: ", msg) else note(msg)
+}
+
 message(sprintf("Capture %s -> %s (delay %gs)", run_ts, out_dir, delay))
 
 # 1. Index page: the site's own country list (D12).
@@ -65,12 +73,12 @@ if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
     note("stopped by HTTP 429/403; not attempted: ", length(attr(man, "not_attempted")), " pages")
   }
   bad <- man[is.na(man$http_status) | man$http_status != 200L, ]
-  for (i in seq_len(nrow(bad))) note(bad$url[i], " -> ", bad$error[i])
+  for (i in seq_len(nrow(bad))) report(bad$url[i], paste0(bad$url[i], " -> ", bad$error[i]))
   # The page must say the date we expect (within a day or two of today).
   dated <- man[!is.na(man$page_date) & man$page_date != "", ]
   age <- as.numeric(as.Date(format(started, "%Y-%m-%d", tz = "UTC")) - as.Date(dated$page_date))
   stale <- dated$url[age < 0 | age > 4]
-  for (u in stale) note("page date out of expected range: ", u)
+  for (u in stale) report(u, paste0("page date out of expected range: ", u))
 }
 
 # 3. Bundle: files + manifest in one tar.

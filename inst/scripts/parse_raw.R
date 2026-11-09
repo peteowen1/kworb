@@ -19,14 +19,33 @@ raw_dir <- if (length(args) >= 1) args[1] else "data/raw"; db_dir <- if (length(
 files <- sort(list.files(raw_dir, "\\.html\\.gz$", full.names = TRUE, recursive = TRUE))
 cat(format(Sys.time(), "%H:%M:%S"), "raw files:", length(files), "in", raw_dir, "\n")
 if (!length(files)) stop("no raw files")
-t0 <- Sys.time(); res <- lapply(files, function(f) tryCatch(parse_raw_file(f), error = function(e) list(table = "ERROR", rows = NULL, error = conditionMessage(e), file = basename(f))))
+# Each file's parsed rows are cached as <db>/_parsed/<raw file>__v<parser version>.parquet, written as soon as the file is
+# parsed: a rerun (or a run killed part way) reads them back instead of re-parsing (old artists pages hold 10,000 rows; the
+# 741 Wayback artists / totals copies took 9.5 min). A new parser version parses everything again.
+cache_dir <- file.path(db_dir, "_parsed"); dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_daily_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else NA_character_ }
+parse_cached <- function(f) {
+  cp <- file.path(cache_dir, paste0(sub("\\.html\\.gz$", "", basename(f)), "__v", kworb_parser_version(), ".parquet"))
+  if (file.exists(cp)) return(list(table = TABLE_OF(f), rows = as.data.frame(read_parquet(cp))))
+  r <- parse_raw_file(f); if (!is.na(r$table)) { tmp <- paste0(cp, ".tmp"); write_parquet(r$rows, tmp); file.rename(tmp, cp) }; r }   # atomic: a kill mid-write leaves no corrupt cache file
+t0 <- Sys.time(); res <- lapply(files, function(f) tryCatch(parse_cached(f), error = function(e) list(table = "ERROR", rows = NULL, error = conditionMessage(e), file = basename(f))))
 tab <- vapply(res, `[[`, "", "table")
 err <- res[tab %in% "ERROR"]
 cat(format(Sys.time(), "%H:%M:%S"), "parsed in", round(as.numeric(difftime(Sys.time(), t0, units = "mins")), 1), "min | by table:\n"); print(table(tab, useNA = "ifany"))
 if (length(err)) { for (e in err) message("PARSE ERROR ", e$file, ": ", e$error); stop(length(err), " of ", length(files), " files failed to parse") }
 
-bind <- function(name) { x <- do.call(rbind, lapply(res[tab %in% name], `[[`, "rows")); rownames(x) <- NULL; x }
+bind <- function(name) { r <- res[tab %in% name]; if (!length(r)) return(NULL)
+  cols <- unique(unlist(lapply(r, function(z) names(z$rows))))   # layouts add columns: fill the missing ones with NA
+  proto <- list(); for (z in r) for (v in setdiff(names(z$rows), names(proto))) proto[[v]] <- z$rows[[v]][NA_integer_][1]   # a typed NA per column
+  x <- do.call(rbind, lapply(r, function(z) { y <- z$rows; for (v in setdiff(cols, names(y))) y[[v]] <- rep(proto[[v]], nrow(y)); y[cols] })); rownames(x) <- NULL; x }
 ce <- bind("chart_entry"); ct <- bind("chart_totals"); ar <- bind("artist_snapshot")
+# a page type with no captures here (a Wayback set without daily charts) is skipped and said so; all three empty is an error
+present <- c(chart_entry = !is.null(ce), chart_totals = !is.null(ct), artist_snapshot = !is.null(ar))
+if (!any(present)) stop("no parsable captures of any page type in ", raw_dir)
+# the daily live job always has all three: a missing one there is a failure (round-2 review). Only a run that sets
+# KWORB_ALLOW_MISSING=1 (the Wayback archive parse) may skip a page type.
+if (!all(present) && !identical(Sys.getenv("KWORB_ALLOW_MISSING"), "1")) stop("no captures of ", paste(names(present)[!present], collapse = ", "), " in ", raw_dir, " (set KWORB_ALLOW_MISSING=1 to skip)")
+if (!all(present)) cat("NOTE: no captures of", paste(names(present)[!present], collapse = ", "), "in", raw_dir, "- those tables are skipped\n")
 
 # Checks run PER CAPTURE (one raw file), not per month: a capture that fails is left out of the tables and listed in
 # <db>/_quarantine.csv with its reason, so one bad page cannot block every later day of the month (the daily job rebuilds the
@@ -43,24 +62,35 @@ KEY <- list(chart_entry = c("country", "frequency", "chart_date", "pos", "captur
 # a daily chart describes the day before (or two) its capture; capture_raw.R accepts up to 4 days, so 0-4 is fine here too.
 # Pages kworb no longer updates (9 Nov 2026: Cyprus stuck at 2017-08-05, Malta 2019-12-25, Russia 2022-04-07, the month
 # Spotify left) are kept and flagged chart_frozen.
-ce$chart_lag_days <- as.numeric(as.Date(substr(ce$captured_at, 1, 10)) - ce$chart_date); ce$chart_frozen <- ce$chart_lag_days > 30
-if (any(ce$chart_frozen)) { fz <- unique(ce[ce$chart_frozen, c("country", "chart_date")]); cat("frozen chart pages (kept, flagged chart_frozen):", paste(fz$country, fz$chart_date, collapse = "; "), "\n") }
+if (!is.null(ce)) { ce$chart_lag_days <- as.numeric(as.Date(substr(ce$captured_at, 1, 10)) - ce$chart_date); ce$chart_frozen <- ce$chart_lag_days > 30 }
+if (!is.null(ce) && any(ce$chart_frozen)) { fz <- unique(ce[ce$chart_frozen, c("country", "chart_date")]); cat("frozen chart pages (kept, flagged chart_frozen):", paste(fz$country, fz$chart_date, collapse = "; "), "\n") }
+# floors follow the page layout: the artists page before May 2023 has no Solo column (a5), and before Apr 2023 only
+# Pos | Artist | Total Streams (a3_chart), so those columns are NA by design and must not be floored (review 9 Nov)
+floors_for <- function(x, name) { f <- FL[[name]]
+  if (name == "chart_entry" && identical(x$frequency[1], "weekly")) f <- c(f[setdiff(names(f), c("days", "streams_7day"))], weeks = 0.99)   # weekly pages: weeks, no 7-day columns
+  if (name == "artist_snapshot" && "layout" %in% names(x)) { lay <- x$layout[1]
+    if (lay == "a5") f <- f[names(f) != "solo"]
+    if (lay == "a3_chart") f <- f[c("artist_id", "artist_name", "streams")]
+    # spring 2023 the page filled its new columns in gradually (Wayback, 9 Nov: daily 28% on 5 Apr, full from 28 Apr; Solo
+    # 27% -> 87% over 7-12 May): real blanks on the page, so those columns are floored only after they filled in
+    d <- substr(x$captured_at[1], 1, 10); if (d < "2023-04-28") f <- f[setdiff(names(f), c("daily", "as_lead", "as_feature"))]; if (d < "2023-05-12") f <- f[names(f) != "solo"] }
+  f }
 check_capture <- function(x, name) {
-  why <- tryCatch({ assert_coverage(x, KEY[[name]], FL[[name]], name); "" }, error = function(e) conditionMessage(e))
+  why <- tryCatch({ assert_coverage(x, KEY[[name]], floors_for(x, name), name); "" }, error = function(e) conditionMessage(e))
   if (nzchar(why)) return(why)
   if (name == "chart_entry") {
-    lg <- x$chart_lag_days[1]
-    if (lg < 0 || (lg > 4 && !x$chart_frozen[1])) return(sprintf("chart_date %s is %d days before capture (allowed 0-4, or frozen > 30)", x$chart_date[1], lg))
+    lg <- x$chart_lag_days[1]; mx <- if (x$frequency[1] == "weekly") 14 else 4   # a weekly page is up to a week older than its capture
+    if (lg < 0 || (lg > mx && !x$chart_frozen[1])) return(sprintf("%s chart_date %s is %d days before capture (allowed 0-%d, or frozen > 30)", x$frequency[1], x$chart_date[1], lg, mx))
     if (!identical(sort(x$pos), seq_along(x$pos))) return("positions do not run 1..n with no gaps")
     if (x$country[1] == "global" && nrow(x) != 200) return(sprintf("global chart has %d positions, not 200", nrow(x))) }
   if (name == "chart_totals" && any(x$total_streams < x$peak_streams, na.rm = TRUE)) return("a total below its peak-day streams")
   "" }
-quar <- list(); keep <- function(x, name) { if (is.null(x) || !nrow(x)) stop(name, ": no rows (no captures of this page type in ", raw_dir, ")")
+quar <- list(); keep <- function(x, name) { if (is.null(x)) return(NULL)
   s <- split(x, x$raw_file); ok <- character()
   for (f in names(s)) { w <- check_capture(s[[f]], name); if (nzchar(w)) quar[[length(quar) + 1]] <<- data.frame(table = name, raw_file = f, captured_at = s[[f]]$captured_at[1], reason = w) else ok <- c(ok, f) }
   x[x$raw_file %in% ok, ] }
 ce <- keep(ce, "chart_entry"); ct <- keep(ct, "chart_totals"); ar <- keep(ar, "artist_snapshot")
-for (nm in names(KEY)) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], FL[[nm]], nm)   # the kept rows, pooled (duplicate keys across captures)
+for (nm in names(KEY)) if (present[[nm]]) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], if (nm == "artist_snapshot") FL[[nm]][c("artist_id", "artist_name", "streams")] else if (nm == "chart_entry") FL[[nm]][setdiff(names(FL[[nm]]), c("days", "streams_7day"))] else FL[[nm]], nm)   # per-capture checks cover the layout-specific columns   # the kept rows, pooled (duplicate keys across captures)
 dir.create(db_dir, recursive = TRUE, showWarnings = FALSE); qf <- file.path(db_dir, "_quarantine.csv")
 if (length(quar)) { q <- do.call(rbind, quar); write.csv(q, qf, row.names = FALSE)
   if (nzchar(Sys.getenv("GITHUB_ACTIONS"))) for (i in seq_len(nrow(q))) cat(sprintf("::warning title=kworb capture quarantined::%s %s: %s\n", q$table[i], q$raw_file[i], q$reason[i]))   # visible on a green run
@@ -68,7 +98,7 @@ cat("QUARANTINED", nrow(q), "capture(s), left out of the tables (", qf, "):\n");
   newest <- max(substr(c(ce$captured_at, ct$captured_at, ar$captured_at, q$captured_at), 1, 10))
   if (any(substr(q$captured_at, 1, 10) == newest)) stop("a capture from the newest day (", newest, ") failed its checks: see above") } else if (file.exists(qf)) file.remove(qf)
 
-write_month <- function(x, name, date_col) {
+write_month <- function(x, name, date_col) { if (!NROW(x)) return(invisible())
   x$month <- substr(x$captured_at, 1, 7)
   for (m in sort(unique(x$month))) { d <- file.path(db_dir, name, paste0("month=", m)); dir.create(d, recursive = TRUE, showWarnings = FALSE)
     y <- x[x$month == m, setdiff(names(x), "month")]; write_parquet(y, file.path(d, "part.parquet"))

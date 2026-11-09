@@ -52,7 +52,7 @@ parse_page_date <- function(html) {
   none <- as.Date(NA)
   if (length(html) != 1 || is.na(html)) return(none)
   pat <- "[0-9]{4}/[0-9]{2}/[0-9]{2}"
-  head <- regmatches(html, regexpr('class="pagetitle">[^<]*', html))
+  head <- regmatches(html, regexpr('class="pagetitle">(<strong>)?[^<]*', html))   # pages to 2019 or so wrap it in <strong>
   if (length(head) == 1) {
     m <- regmatches(head, regexpr(pat, head))
     if (length(m) == 1) return(as.Date(m, format = "%Y/%m/%d"))

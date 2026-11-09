@@ -55,13 +55,16 @@ check_capture <- function(x, name) {
     if (x$country[1] == "global" && nrow(x) != 200) return(sprintf("global chart has %d positions, not 200", nrow(x))) }
   if (name == "chart_totals" && any(x$total_streams < x$peak_streams, na.rm = TRUE)) return("a total below its peak-day streams")
   "" }
-quar <- list(); keep <- function(x, name) { s <- split(x, x$raw_file); ok <- character()
+quar <- list(); keep <- function(x, name) { if (is.null(x) || !nrow(x)) stop(name, ": no rows (no captures of this page type in ", raw_dir, ")")
+  s <- split(x, x$raw_file); ok <- character()
   for (f in names(s)) { w <- check_capture(s[[f]], name); if (nzchar(w)) quar[[length(quar) + 1]] <<- data.frame(table = name, raw_file = f, captured_at = s[[f]]$captured_at[1], reason = w) else ok <- c(ok, f) }
   x[x$raw_file %in% ok, ] }
 ce <- keep(ce, "chart_entry"); ct <- keep(ct, "chart_totals"); ar <- keep(ar, "artist_snapshot")
 for (nm in names(KEY)) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], FL[[nm]], nm)   # the kept rows, pooled (duplicate keys across captures)
 dir.create(db_dir, recursive = TRUE, showWarnings = FALSE); qf <- file.path(db_dir, "_quarantine.csv")
-if (length(quar)) { q <- do.call(rbind, quar); write.csv(q, qf, row.names = FALSE); cat("QUARANTINED", nrow(q), "capture(s), left out of the tables (", qf, "):\n"); print(q, row.names = FALSE)
+if (length(quar)) { q <- do.call(rbind, quar); write.csv(q, qf, row.names = FALSE)
+  if (nzchar(Sys.getenv("GITHUB_ACTIONS"))) for (i in seq_len(nrow(q))) cat(sprintf("::warning title=kworb capture quarantined::%s %s: %s\n", q$table[i], q$raw_file[i], q$reason[i]))   # visible on a green run
+cat("QUARANTINED", nrow(q), "capture(s), left out of the tables (", qf, "):\n"); print(q, row.names = FALSE)
   newest <- max(substr(c(ce$captured_at, ct$captured_at, ar$captured_at, q$captured_at), 1, 10))
   if (any(substr(q$captured_at, 1, 10) == newest)) stop("a capture from the newest day (", newest, ") failed its checks: see above") } else if (file.exists(qf)) file.remove(qf)
 

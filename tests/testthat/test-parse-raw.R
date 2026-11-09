@@ -98,6 +98,22 @@ test_that("totals pages before 2023 lead with Pos; the rest of the row is unchan
   expect_equal(x$title, c("Blinding Lights", "Sweater Weather")); expect_equal(x$top10_days, c(446, NA))
 })
 
+# global weekly totals (country/global_weekly_totals.html): the daily totals layout with Wks for Days (Wayback 2016-07 and 2026-10)
+wtotals_page <- sub("<th>Days</th>", "<th>Wks</th>", totals_page, fixed = TRUE)
+wtotals_pos_page <- sub("<th>Days</th>", "<th>Wks</th>", totals_pos_page, fixed = TRUE)
+
+test_that("weekly totals: weeks, not days; both layouts; a daily header is refused", {
+  x <- parse_chart_totals(wtotals_page, "global", "weekly")
+  expect_equal(x$frequency[1], "weekly"); expect_equal(x$weeks, c(2532, 1585)); expect_equal(x$top10_weeks, c(446, NA))
+  expect_true(all(is.na(x$days))); expect_true(all(is.na(x$top10_days))); expect_equal(x$total_streams, c(5576476177, 4378259987))
+  y <- parse_chart_totals(wtotals_pos_page, "global", "weekly"); expect_equal(y$layout[1], "t8_pos"); expect_equal(y$weeks, c(2532, 1585))
+  d <- parse_chart_totals(totals_page, "global"); expect_true(all(is.na(d$weeks))); expect_equal(d$days, c(2532, 1585))
+  expect_error(parse_chart_totals(totals_page, "global", "weekly"), "header changed")
+  f <- file.path(withr::local_tempdir(), "country-global_weekly_totals__wb20161011094006.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(wtotals_page), con); close(con)
+  r <- parse_raw_file(f); expect_equal(r$table, "chart_totals"); expect_equal(r$rows$frequency[1], "weekly"); expect_equal(r$rows$source[1], "wayback")
+})
+
 test_that("a page with no closing </table> drops its last row, even when that row has every cell", {
   cut <- sub('<td>10,083,293,261</td></tr> .*$', '<td>10,083,', artists_chart_page)   # cut mid-number, as artists__wb20211023 is
   x <- parse_artists(cut)

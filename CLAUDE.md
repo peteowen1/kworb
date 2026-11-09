@@ -25,7 +25,7 @@ scrape_track_history(track_id)   → per-country daily stream history
   → predict_streams()            → apply
 ```
 
-33 exports across 9 R files.
+41 exports across 12 R files.
 
 ## The kworb database (docs/plans/kworb-db.md) — the current path
 

@@ -8,7 +8,7 @@
 #' Parser version written on every parsed row
 #' @return Integer.
 #' @keywords internal
-kworb_parser_version <- function() 4L   # 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
+kworb_parser_version <- function() 5L   # 5: global weekly totals pages (chart_totals, frequency weekly; weeks / top10_weeks). 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
 
 #' Number from a kworb cell
 #'
@@ -135,27 +135,34 @@ parse_weekly_chart <- function(html, country) {
   out
 }
 
-#' Parse a saved "Totals" page (global daily totals)
+#' Parse a saved "Totals" page (global daily or weekly chart totals)
 #'
+#' The daily page counts days on the chart (`Days`), the weekly page weeks (`Wks`); the rest of the layout is the same.
+#' Daily rows fill `days` / `top10_days`, weekly rows `weeks` / `top10_weeks`; the other pair is NA.
 #' @param html Page text.
 #' @param country Country code from the file name.
+#' @param frequency `"daily"` or `"weekly"`.
 #' @return Data frame, one row per track: chart-time totals as the page states them, with `covers_from` / `covers_to`.
 #' @keywords internal
-parse_chart_totals <- function(html, country) {
+parse_chart_totals <- function(html, country, frequency = "daily") {
+  stopifnot(frequency %in% c("daily", "weekly"))
   rd <- kworb_read_html(html); t <- kworb_table(rd$doc, drop_last = rd$incomplete); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
   if (is.null(t)) stop("totals ", country, ": no table")
-  T7 <- c("Artist and Title", "Days", "T10", "Pk", "(x?)", "PkStreams", "Total")
-  lay <- kworb_layout(t$header, list(t7 = T7, t8_pos = c("Pos", T7)), paste("totals", country))   # t8_pos: pages before 2023 lead with Pos
+  T7 <- c("Artist and Title", if (frequency == "daily") "Days" else "Wks", "T10", "Pk", "(x?)", "PkStreams", "Total")
+  lay <- kworb_layout(t$header, list(t7 = T7, t8_pos = c("Pos", T7)), paste(frequency, "totals", country))   # t8_pos: pages before 2023 lead with Pos
   page_pos <- if (lay == "t8_pos") as.integer(t$cells[, 1]) else NA_integer_
   x <- if (lay == "t8_pos") t$cells[, -1, drop = FALSE] else t$cells
+  dly <- frequency == "daily"; NAn <- rep(NA_real_, nrow(x)); NAc <- rep(NA_character_, nrow(x))
   out <- cbind(kworb_title_cells(t$rows, if (lay == "t8_pos") 2 else 1),
-               data.frame(days = kworb_num(x[, 2]), top10_days_raw = x[, 3], top10_days = kworb_num(x[, 3]), peak_pos = kworb_num(x[, 4]), peak_count_raw = x[, 5],
+               data.frame(days = if (dly) kworb_num(x[, 2]) else NAn, top10_days_raw = if (dly) x[, 3] else NAc, top10_days = if (dly) kworb_num(x[, 3]) else NAn,
+                          weeks = if (dly) NAn else kworb_num(x[, 2]), top10_weeks_raw = if (dly) NAc else x[, 3], top10_weeks = if (dly) NAn else kworb_num(x[, 3]),
+                          peak_pos = kworb_num(x[, 4]), peak_count_raw = x[, 5],
                           peak_count = kworb_num(sub("^\\(x([0-9]+)\\)$", "\\1", x[, 5])), peak_streams = kworb_num(x[, 6]), total_streams = kworb_num(x[, 7]),
                           stringsAsFactors = FALSE))
   cov <- regmatches(html, regexpr("Covers charts from [0-9]{4}/[0-9]{2}/[0-9]{2} to [0-9]{4}/[0-9]{2}/[0-9]{2}", html))
   d <- if (length(cov)) regmatches(cov, gregexpr("[0-9]{4}/[0-9]{2}/[0-9]{2}", cov))[[1]] else c(NA, NA)
   out$covers_from <- as.Date(d[1], format = "%Y/%m/%d"); out$covers_to <- as.Date(d[2], format = "%Y/%m/%d")
-  out$rank <- seq_len(nrow(out)); out$page_pos <- page_pos; out$country <- country; out$frequency <- "daily"; out$snapshot_date <- out$covers_to; out$layout <- lay; out$page_truncated <- t$truncated
+  out$rank <- seq_len(nrow(out)); out$page_pos <- page_pos; out$country <- country; out$frequency <- frequency; out$snapshot_date <- out$covers_to; out$layout <- lay; out$page_truncated <- t$truncated
   out
 }
 
@@ -211,7 +218,10 @@ parse_raw_file <- function(path) {
   html <- rawToChar(raw); Encoding(html) <- "UTF-8"
   m <- regmatches(slug, regexec("^country-([a-z]+)_daily(_totals)?$", slug))[[1]]
   wk <- regmatches(slug, regexec("^country-([a-z]+)_weekly$", slug))[[1]]
-  if (length(wk)) {
+  wt <- regmatches(slug, regexec("^country-([a-z]+)_weekly_totals$", slug))[[1]]
+  if (length(wt)) {
+    rows <- parse_chart_totals(html, wt[2], "weekly"); table <- "chart_totals"
+  } else if (length(wk)) {
     rows <- parse_weekly_chart(html, wk[2]); table <- "chart_entry"
   } else if (length(m)) {
     rows <- if (nzchar(m[3])) parse_chart_totals(html, m[2]) else parse_daily_chart(html, m[2])

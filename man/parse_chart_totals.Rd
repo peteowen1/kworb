@@ -2,19 +2,22 @@
 % Please edit documentation in R/parse_raw.R
 \name{parse_chart_totals}
 \alias{parse_chart_totals}
-\title{Parse a saved "Totals" page (global daily totals)}
+\title{Parse a saved "Totals" page (global daily or weekly chart totals)}
 \usage{
-parse_chart_totals(html, country)
+parse_chart_totals(html, country, frequency = "daily")
 }
 \arguments{
 \item{html}{Page text.}
 
 \item{country}{Country code from the file name.}
+
+\item{frequency}{\code{"daily"} or \code{"weekly"}.}
 }
 \value{
 Data frame, one row per track: chart-time totals as the page states them, with \code{covers_from} / \code{covers_to}.
 }
 \description{
-Parse a saved "Totals" page (global daily totals)
+The daily page counts days on the chart (\code{Days}), the weekly page weeks (\code{Wks}); the rest of the layout is the same.
+Daily rows fill \code{days} / \code{top10_days}, weekly rows \code{weeks} / \code{top10_weeks}; the other pair is NA.
 }
 \keyword{internal}

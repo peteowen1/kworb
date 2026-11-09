@@ -26,7 +26,7 @@ kworb_num <- function(x) {
 
 # the table's header texts, its cells as a character matrix (one row per <tr>), and the <tr> nodes. Vectorised: one XPath
 # query per table, not one per cell (the per-row version took minutes for a 12,000-row totals page).
-kworb_table <- function(doc) {
+kworb_table <- function(doc, drop_last = FALSE) {
   tb <- rvest::html_element(doc, "table")
   if (inherits(tb, "xml_missing")) return(NULL)
   # header = the first row with <th> cells (in <thead> today; a plain first <tr> on pages before 2023); data rows = every
@@ -37,7 +37,7 @@ kworb_table <- function(doc) {
   nc <- xml2::xml_find_num(rows, "count(./td)")
   # a Wayback copy can be cut off mid-row (artists__wb20190716: row 7,246 is '<a href="artist/"></a>' and no streams cell):
   # a short LAST row is dropped and the page marked truncated; a short row anywhere else is a layout change and stops
-  truncated <- length(rows) > 0 && nc[length(nc)] < ncol && all(nc[-length(nc)] == ncol)
+  truncated <- length(rows) > 0 && ((nc[length(nc)] < ncol && all(nc[-length(nc)] == ncol)) || drop_last)
   if (truncated) { rows <- rows[-length(rows)]; nc <- nc[-length(nc)] }
   if (length(rows) && any(nc != ncol)) stop("a row has ", nc[nc != ncol][1], " cells, not ", ncol, " (the header's count)")
   xml2::xml_set_attr(rows, "data-kw-row", seq_along(rows))
@@ -51,11 +51,13 @@ kworb_table <- function(doc) {
 # table closed, and the document is marked truncated: the rows before the cut are real, the rest of the page is missing.
 kworb_read_html <- function(html) {
   d <- tryCatch(rvest::read_html(html), error = function(e) NULL)
-  if (!is.null(d)) return(list(doc = d, cut = FALSE))
+  # a copy with no closing </table> was cut somewhere (at a row boundary, or mid-cell: artists__wb20211023 ends '<td>4,952,',
+  # which would read as 4,952 streams): its last row cannot be trusted, so kworb_table() drops it (review 9 Nov)
+  if (!is.null(d)) return(list(doc = d, cut = FALSE, incomplete = !grepl("</table>", html, fixed = TRUE)))
   ends <- gregexpr("</tr>", html, fixed = TRUE)[[1]]
   if (ends[1] < 0) stop("page does not parse and has no complete table row")
   last <- ends[length(ends)] + 4L
-  list(doc = rvest::read_html(paste0(substr(html, 1, last), "</tbody></table></body></html>")), cut = TRUE)
+  list(doc = rvest::read_html(paste0(substr(html, 1, last), "</tbody></table></body></html>")), cut = TRUE, incomplete = FALSE)   # already cut at a complete row
 }
 
 # pick the layout whose header matches; stop naming every known layout when none does
@@ -92,7 +94,7 @@ kworb_title_cells <- function(rows, col) {
 #' @return Data frame, one row per chart position: every column the page shows, plus `chart_date` from the page heading.
 #' @keywords internal
 parse_daily_chart <- function(html, country) {
-  rd <- kworb_read_html(html); t <- kworb_table(rd$doc); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
+  rd <- kworb_read_html(html); t <- kworb_table(rd$doc, drop_last = rd$incomplete); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
   if (is.null(t)) stop("daily chart ", country, ": no table")
   lay <- kworb_layout(t$header, list(d11 = c("Pos", "P+", "Artist and Title", "Days", "Pk", "(x?)", "Streams", "Streams+", "7Day", "7Day+", "Total")), paste("daily chart", country))
   x <- t$cells
@@ -116,7 +118,7 @@ parse_daily_chart <- function(html, country) {
 #' @return Data frame, one row per track: chart-time totals as the page states them, with `covers_from` / `covers_to`.
 #' @keywords internal
 parse_chart_totals <- function(html, country) {
-  rd <- kworb_read_html(html); t <- kworb_table(rd$doc); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
+  rd <- kworb_read_html(html); t <- kworb_table(rd$doc, drop_last = rd$incomplete); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
   if (is.null(t)) stop("totals ", country, ": no table")
   T7 <- c("Artist and Title", "Days", "T10", "Pk", "(x?)", "PkStreams", "Total")
   lay <- kworb_layout(t$header, list(t7 = T7, t8_pos = c("Pos", T7)), paste("totals", country))   # t8_pos: pages before 2023 lead with Pos
@@ -142,7 +144,7 @@ parse_chart_totals <- function(html, country) {
 #' @return Data frame, one row per artist.
 #' @keywords internal
 parse_artists <- function(html) {
-  rd <- kworb_read_html(html); t <- kworb_table(rd$doc); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
+  rd <- kworb_read_html(html); t <- kworb_table(rd$doc, drop_last = rd$incomplete); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
   if (is.null(t)) stop("artists: no table")
   lay <- kworb_layout(t$header, list(
     a6 = c("Artist", "Streams", "Daily", "As lead", "Solo", "As feature"),      # from May 2023: all-time streams, millions

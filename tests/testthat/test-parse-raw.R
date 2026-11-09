@@ -98,6 +98,13 @@ test_that("totals pages before 2023 lead with Pos; the rest of the row is unchan
   expect_equal(x$title, c("Blinding Lights", "Sweater Weather")); expect_equal(x$top10_days, c(446, NA))
 })
 
+test_that("a page with no closing </table> drops its last row, even when that row has every cell", {
+  cut <- sub('<td>10,083,293,261</td></tr> .*$', '<td>10,083,', artists_chart_page)   # cut mid-number, as artists__wb20211023 is
+  x <- parse_artists(cut)
+  expect_equal(nrow(x), 1); expect_equal(x$streams, 16396856485); expect_true(x$page_truncated[1])
+  y <- parse_artists(artists_page); expect_equal(nrow(y), 2); expect_false(y$page_truncated[1])
+})
+
 test_that("a short row that is not the last one still stops the parser", {
   bad <- sub('<td class="smaller">99,625.8</td> ', "", artists_page, fixed = TRUE)
   expect_error(parse_artists(bad), "cells, not 6")

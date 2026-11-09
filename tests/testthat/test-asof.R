@@ -42,6 +42,8 @@ test_that("window_streams needs both ends in one era", {
   # start 2023-01-01 is chart era, end is all era: different scales, so missing
   expect_equal(e$method, "missing"); expect_true(is.na(e$value))
   expect_equal(e$start_value, 100)
+  nl <- kworb_asof("C", as.Date("2023-06-10"), S, what = "window_streams", window_days = 30)
+  expect_equal(nl$method, "not_listed"); expect_true(is.na(nl$value))   # below the cut-off at the end stays not_listed
 })
 
 test_that("inputs are checked and answers come back in input order", {

@@ -18,7 +18,7 @@ kworb_artist_snapshots <- function(db_dirs = c("data/db", "data/db_wayback")) {
   out <- do.call(rbind, lapply(parts, function(p) {
     x <- as.data.frame(arrow::read_parquet(p))
     for (cc in setdiff(keep, names(x))) x[[cc]] <- NA
-    if (all(is.na(x$source))) x$source <- "live"
+    if (all(is.na(x$source))) x$source <- if (grepl("db_wayback", p, fixed = TRUE)) "wayback" else "live"
     x$era <- ifelse(is.na(x$era), ifelse(is.na(x$daily), "chart", "all"), x$era)
     x$page_truncated <- x$page_truncated %in% TRUE
     x$captured_at <- as.POSIXct(as.character(x$captured_at), format = "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
@@ -103,6 +103,6 @@ kworb_asof <- function(ids, date, snapshots, what = c("artist_total", "window_st
   ok <- !is.na(res$value) & !is.na(st$value) & res$era == st$era
   res$start_value <- st$value; res$start_method <- st$method; res$start_captured_at <- st$snap_captured_at
   res$value <- ifelse(ok, res$value - st$value, NA_real_)
-  res$method <- ifelse(ok, res$method, "missing")
+  res$method <- ifelse(ok, res$method, ifelse(res$method == "not_listed", "not_listed", "missing"))   # keep "below the cut-off" apart from "no data" (review nit)
   res
 }

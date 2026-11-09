@@ -4,15 +4,16 @@
 #   defaults: data/raw  data/db   (run from the package root; arrow segfaults under Git Bash R, so on Windows run it
 #   through PowerShell: powershell.exe -Command "Rscript 'inst/scripts/parse_raw.R'")
 #
-# Tables (one parquet per table per month of the day the numbers describe, hive style: <db>/<table>/month=YYYY-MM/part.parquet):
+# Tables (one parquet per table per CAPTURE month, hive style: <db>/<table>/month=YYYY-MM/part.parquet; by capture month, not by
+# the day the numbers describe, so a closed month never changes and frozen pages (a 2017 chart captured today) stay in today's month):
 #   chart_entry      daily top-200 charts, 77 countries   key country, frequency, chart_date, pos, captured_at
 #   chart_totals     global daily Totals page            key country, frequency, snapshot_date, track_id, captured_at
 #   artist_snapshot  artists.html (no page date: snapshot_date is the capture's UTC date)   key snapshot_date, artist_id, captured_at
 # Every capture is kept (captured_at is part of the key): a page captured twice gives two copies, so an as-of query can
-# drop anything captured after its date. A whole month is rewritten from all raw files each run, so the output is a pure
-# function of data/raw. Coverage is asserted per table before anything is written: a renamed column upstream fails the run.
+# drop anything captured after its date. Each month present in raw_dir is rewritten from its raw files, so the output is a pure
+# function of data/raw; the daily job passes only the current month's captures. Coverage is asserted per table before anything is written: a renamed column upstream fails the run.
 suppressPackageStartupMessages({ library(arrow) })
-if (file.exists("DESCRIPTION")) devtools::load_all(".", quiet = TRUE) else library(kworb)
+if (file.exists("DESCRIPTION") && requireNamespace("devtools", quietly = TRUE)) devtools::load_all(".", quiet = TRUE) else library(kworb)   # CI: the installed package
 args <- commandArgs(trailingOnly = TRUE)
 raw_dir <- if (length(args) >= 1) args[1] else "data/raw"; db_dir <- if (length(args) >= 2) args[2] else "data/db"
 files <- sort(list.files(raw_dir, "\\.html\\.gz$", full.names = TRUE, recursive = TRUE))
@@ -51,7 +52,7 @@ stopifnot("global chart has 200 positions" = all(table(ce$chart_date[ce$country 
           "totals: total >= peak-day streams" = all(ct$total_streams >= ct$peak_streams, na.rm = TRUE))
 
 write_month <- function(x, name, date_col) {
-  x$month <- format(x[[date_col]], "%Y-%m")
+  x$month <- substr(x$captured_at, 1, 7)
   for (m in sort(unique(x$month))) { d <- file.path(db_dir, name, paste0("month=", m)); dir.create(d, recursive = TRUE, showWarnings = FALSE)
     y <- x[x$month == m, setdiff(names(x), "month")]; write_parquet(y, file.path(d, "part.parquet"))
     cat(sprintf("  %-16s month=%s  %8d rows  %3d captures  %s to %s\n", name, m, nrow(y), length(unique(y$captured_at)), min(y[[date_col]]), max(y[[date_col]]))) } }

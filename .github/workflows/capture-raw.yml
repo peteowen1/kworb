@@ -59,3 +59,15 @@ jobs:
 
       - name: Capture and upload (fails on any failed page or upload)
         run: Rscript inst/scripts/capture_raw.R
+
+      # Stage 2: rebuild this capture month's tables from every raw tar of the month (today's included) and replace
+      # the month's assets on mediadata release kworb-db. Runs only if the capture step succeeded.
+      - name: Rebuild and publish this month's tables (fails on any parse, coverage or upload problem)
+        run: |
+          month=$(date -u +%Y-%m)
+          mkdir -p data/raw_tars data/raw
+          gh release download "kworb-raw-$month" -R "$MEDIADATA_REPO" -p 'kworb-raw-2*.tar' -D data/raw_tars
+          for t in data/raw_tars/*.tar; do tar -xf "$t" -C data/raw; done
+          echo "raw files for $month: $(ls data/raw | wc -l)"
+          Rscript inst/scripts/parse_raw.R data/raw data/db
+          Rscript inst/scripts/publish_db.R data/db "$month"

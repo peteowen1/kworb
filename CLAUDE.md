@@ -63,6 +63,7 @@ inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / glob
 | `fetch_raw.R` | `fetch_raw()`, `fetch_raw_pages()`: one request, body saved untouched, manifest row, STOP on 429/403 (Stage 1) |
 | `parse_raw.R` | `parse_raw_file()` and the page parsers (every layout back to 2016), `assert_coverage()` (Stage 2-3) |
 | `db.R` | `kworb_db_summary()` |
+| `asof.R` | `kworb_artist_snapshots()` (load `artist_snapshot` from `data/db` + `data/db_wayback`), `kworb_asof()` (plan 3.4: an artist's total or window streams as of a day, strict on `captured_at`; method exact / last_before / interpolated / not_listed / missing; cut-off copies never read as "not listed") |
 | `utils.R` + `globals.R` + `zzz.R` | Helpers + NSE globals + onLoad |
 
 ## Data Persistence

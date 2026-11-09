@@ -1,0 +1,80 @@
+# Parsers for the Stage 2 tables. Pages are small hand-made copies of the real layouts (kworb.net, 9 Nov 2026):
+# same tags, classes and headers, two rows each.
+chart_page <- paste0(
+  '<html><span class="pagetitle">Spotify Daily Chart - Global - 2026/11/07 | <a href="x">Totals</a></span>',
+  '<table class="sortable" id="spotifydaily"><thead><tr><th class="np">Pos</th><th class="np">P+</th><th class="mp text col-title">Artist and Title</th>',
+  '<th>Days</th><th>Pk</th><th class="mini text">(x?)</th><th>Streams</th><th>Streams+</th><th>7Day</th><th>7Day+</th><th>Total</th></tr></thead><tbody>',
+  '<tr><td class="np">1</td> <td class="np">+1</td> <td class="text mp"><div><a href="../artist/790FomKkXshlbRYZFtlgla.html">KAROL G</a> - ',
+  '<a href="../track/3h5T5JypYU7huFiVYhv1dr.html">BbY WOW</a> (w/ <a href="../artist/1H6X7yhnXZg73f9bssaj1Q.html">Judeline</a>, ',
+  '<a href="../artist/1XEVu7gdRFfzEFqsPrancH.html">rusowsky</a>)</div></td> <td>88</td> <td>1</td><td class="np mini text">(x49)</td> ',
+  '<td>5,075,633</td> <td>+96,820</td> <td class="smaller">33,042,099</td> <td class="smaller">-286,376</td> <td>421,987,118</td></tr>',
+  '<tr><td class="np">2</td> <td class="np">NEW</td> <td class="text mp"><div><a href="../artist/45dkTj5sMRSjrmBSBeiHym.html">Tate McRae</a> - ',
+  '<a href="../track/2sFepQNyl1WjpROruP8bJ0.html">Housewife</a></div></td> <td>1</td> <td>2</td><td class="np mini text"></td> ',
+  '<td>4,567,570</td> <td></td> <td class="smaller">4,567,570</td> <td class="smaller"></td> <td>4,567,570</td></tr></tbody></table></html>')
+totals_page <- paste0(
+  '<html>Covers charts from 2014/08/10 to 2026/11/07.<br><table class="addpos sortable"><thead><tr> <th class="text">Artist and Title</th> <th>Days</th> ',
+  '<th>T10</th> <th>Pk</th> <th class="mini text">(x?)</th> <th>PkStreams</th> <th>Total</th> </tr></thead><tbody>',
+  '<tr> <td class="text mp"><div><a href="../artist/1Xyo4u8uXC1ZmMpatF05PJ.html">The Weeknd</a> - <a href="../track/0VjIjW4GlUZAMYd2vXMi3b.html">Blinding Lights</a></div></td> ',
+  '<td>2532</td> <td>446</td> <td>1</td><td class="np mini text">(x82)</td> <td>8,453,567</td> <td>5,576,476,177</td></tr>',
+  '<tr> <td class="text mp"><div><a href="../artist/77SW9BnxLY8rJ0RciFqkHh.html">The Neighbourhood</a> - <a href="../track/2QjOHCTQ1Jl3zawyYOpxh6.html">Sweater Weather</a></div></td> ',
+  '<td>1585</td> <td></td> <td>11</td><td class="np mini text"></td> <td>3,342,205</td> <td>4,378,259,987</td></tr></tbody></table></html>')
+artists_page <- paste0(
+  '<html><table class="addpos sortable"><thead><tr> <th class="text">Artist</th> <th>Streams</th> <th>Daily</th> <th>As lead</th> <th>Solo</th> <th>As feature</th> </tr></thead><tbody>',
+  '<tr> <td class="text"><div><a href="/spotify/artist/3TVXtAsR1Inumwj472S9r4_songs.html">Drake</a></div></td> <td>144,339.9</td> <td>56.900</td> ',
+  '<td class="smaller">99,625.8</td> <td class="smaller">56,287.0</td> <td class="smaller">44,714.1</td></tr>',
+  '<tr> <td class="text"><div><a href="/spotify/artist/06HL4z0CvFAxyc27GXpf02_songs.html">Taylor Swift</a></div></td> <td>133,199.6</td> <td>40.810</td> ',
+  '<td class="smaller">129,223.8</td> <td class="smaller">118,300.9</td> <td class="smaller"></td></tr></tbody></table></html>')
+
+test_that("kworb_num handles separators, signs and tokens", {
+  expect_equal(kworb_num(c("5,075,633", "+96,820", "-286,376", "56.900", "", "=", "NEW", "(x49)")), c(5075633, 96820, -286376, 56.9, NA, NA, NA, NA))
+})
+
+test_that("daily chart: every column, lead and featured artists, movement types", {
+  x <- parse_daily_chart(chart_page, "global")
+  expect_equal(nrow(x), 2); expect_equal(x$pos, 1:2); expect_equal(x$chart_date, as.Date(c("2026-11-07", "2026-11-07")))
+  expect_equal(x$track_id, c("3h5T5JypYU7huFiVYhv1dr", "2sFepQNyl1WjpROruP8bJ0")); expect_equal(x$title, c("BbY WOW", "Housewife"))
+  expect_equal(x$lead_artist_ids[1], "790FomKkXshlbRYZFtlgla")
+  expect_equal(x$feat_artist_ids[1], "1H6X7yhnXZg73f9bssaj1Q;1XEVu7gdRFfzEFqsPrancH"); expect_equal(x$feat_artist_names[1], "Judeline;rusowsky")
+  expect_equal(x$feat_artist_ids[2], "")
+  expect_equal(x$streams, c(5075633, 4567570)); expect_equal(x$streams_change, c(96820, NA)); expect_equal(x$streams_7day_change, c(-286376, NA))
+  expect_equal(x$streams_total[1], 421987118); expect_equal(x$peak_count, c(49, NA)); expect_equal(x$peak_count_raw[2], "")
+  expect_equal(x$pos_change_type, c("move", "new")); expect_equal(x$pos_change, c(1, NA))
+})
+
+test_that("totals page: chart-time totals and the Covers dates", {
+  x <- parse_chart_totals(totals_page, "global")
+  expect_equal(x$total_streams, c(5576476177, 4378259987)); expect_equal(x$peak_streams[1], 8453567)
+  expect_equal(x$top10_days, c(446, NA)); expect_equal(x$peak_count, c(82, NA)); expect_equal(x$rank, 1:2)
+  expect_equal(x$covers_from[1], as.Date("2014-08-10")); expect_equal(x$snapshot_date[1], as.Date("2026-11-07"))
+})
+
+test_that("artists page: raw units with their resolution, blank cells stay NA", {
+  x <- parse_artists(artists_page)
+  expect_equal(x$artist_id, c("3TVXtAsR1Inumwj472S9r4", "06HL4z0CvFAxyc27GXpf02"))
+  expect_equal(x$streams[1], 144339900000); expect_equal(x$daily[1], 56900000); expect_equal(x$streams_m[1], 144339.9)
+  expect_true(is.na(x$as_feature[2])); expect_equal(x$streams_resolution[1], 1e5)
+})
+
+test_that("a changed header stops the parser instead of shifting columns", {
+  expect_error(parse_daily_chart(sub("<th>7Day</th>", "<th>Week</th>", chart_page), "global"), "header changed")
+  expect_error(parse_artists(sub("<th>Daily</th>", "<th>Today</th>", artists_page)), "header changed")
+})
+
+test_that("parse_raw_file picks the table from the file name and adds both clocks", {
+  d <- withr::local_tempdir(); f <- file.path(d, "country-global_daily__20261109T010942Z.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(chart_page), con); close(con)
+  r <- parse_raw_file(f)
+  expect_equal(r$table, "chart_entry"); expect_equal(r$rows$captured_at[1], "2026-11-09T01:09:42Z")
+  expect_equal(r$rows$chart_date[1], as.Date("2026-11-07")); expect_equal(r$rows$parser_version[1], kworb_parser_version())
+  g <- file.path(d, "index__20261109T010941Z.html.gz"); con <- gzfile(g, "wb"); writeBin(charToRaw("<html></html>"), con); close(con)
+  expect_true(is.na(parse_raw_file(g)$table))
+})
+
+test_that("assert_coverage fails on an empty column, a duplicate key and no rows", {
+  x <- data.frame(k = 1:3, a = c("x", "y", "z"), b = c(1, NA, NA), stringsAsFactors = FALSE)
+  expect_silent(assert_coverage(x, "k", c(a = 1)))
+  expect_error(assert_coverage(x, "k", c(b = 0.9)), "coverage below floor")
+  expect_error(assert_coverage(transform(x, a = "")[, c("k", "a")], "k", c(a = 0.5)), "coverage below floor")
+  expect_error(assert_coverage(rbind(x, x[1, ]), "k", c(a = 1)), "duplicate key")
+  expect_error(assert_coverage(x[0, ], "k", c(a = 1)), "no rows")
+})

@@ -28,28 +28,42 @@ if (length(err)) { for (e in err) message("PARSE ERROR ", e$file, ": ", e$error)
 bind <- function(name) { x <- do.call(rbind, lapply(res[tab %in% name], `[[`, "rows")); rownames(x) <- NULL; x }
 ce <- bind("chart_entry"); ct <- bind("chart_totals"); ar <- bind("artist_snapshot")
 
-# coverage floors: share of rows with a value. Columns that are blank on the page by design (featured artists, the (xN)
-# count, top-10 days for tracks that never made it) are not floored; a page change that empties a floored column fails here.
-assert_coverage(ce, c("country", "frequency", "chart_date", "pos", "captured_at"),
-  c(chart_date = 1, pos = 1, track_id = 0.999, title = 0.999, lead_artist_ids = 0.99, days = 0.999, peak_pos = 0.999, streams = 0.999,
-    streams_7day = 0.99, streams_total = 0.99, pos_change_raw = 0.999), "chart_entry")
-assert_coverage(ct, c("country", "frequency", "snapshot_date", "track_id", "captured_at"),
-  c(snapshot_date = 1, covers_from = 1, track_id = 1, title = 0.999, lead_artist_ids = 0.99, days = 0.999, peak_pos = 0.999, peak_streams = 0.999, total_streams = 0.999), "chart_totals")
-assert_coverage(ar, c("snapshot_date", "artist_id", "captured_at"),
-  c(artist_id = 1, artist_name = 1, streams = 0.999, daily = 0.99, as_lead = 0.9, solo = 0.85, as_feature = 0.8), "artist_snapshot")
-# page date = the date the capture expected: a daily chart describes the day before (or two before) its capture
-lag <- as.numeric(as.Date(substr(ce$captured_at, 1, 10)) - ce$chart_date)
+# Checks run PER CAPTURE (one raw file), not per month: a capture that fails is left out of the tables and listed in
+# <db>/_quarantine.csv with its reason, so one bad page cannot block every later day of the month (the daily job rebuilds the
+# whole month). The run fails only if a capture from the NEWEST capture day fails: that day's job goes red once, later days
+# publish without it. Coverage floors: share of rows with a value; columns blank on the page by design (featured artists,
+# the (xN) count, top-10 days for tracks that never made it) are not floored.
+FL <- list(
+  chart_entry = c(chart_date = 1, pos = 1, track_id = 0.99, title = 0.99, lead_artist_ids = 0.98, days = 0.99, peak_pos = 0.99, streams = 0.99,
+                  streams_7day = 0.98, streams_total = 0.98, pos_change_raw = 0.99),
+  chart_totals = c(snapshot_date = 1, covers_from = 1, track_id = 1, title = 0.999, lead_artist_ids = 0.99, days = 0.999, peak_pos = 0.999, peak_streams = 0.999, total_streams = 0.999),
+  artist_snapshot = c(artist_id = 1, artist_name = 1, streams = 0.999, daily = 0.99, as_lead = 0.9, solo = 0.85, as_feature = 0.8))
+KEY <- list(chart_entry = c("country", "frequency", "chart_date", "pos", "captured_at"), chart_totals = c("country", "frequency", "snapshot_date", "track_id", "captured_at"),
+            artist_snapshot = c("snapshot_date", "artist_id", "captured_at"))
+# a daily chart describes the day before (or two) its capture; capture_raw.R accepts up to 4 days, so 0-4 is fine here too.
 # Pages kworb no longer updates (9 Nov 2026: Cyprus stuck at 2017-08-05, Malta 2019-12-25, Russia 2022-04-07, the month
-# Spotify left) are kept, flagged chart_frozen; anything else outside 0-3 days is a capture problem and fails the run.
-ce$chart_frozen <- lag > 30
+# Spotify left) are kept and flagged chart_frozen.
+ce$chart_lag_days <- as.numeric(as.Date(substr(ce$captured_at, 1, 10)) - ce$chart_date); ce$chart_frozen <- ce$chart_lag_days > 30
 if (any(ce$chart_frozen)) { fz <- unique(ce[ce$chart_frozen, c("country", "chart_date")]); cat("frozen chart pages (kept, flagged chart_frozen):", paste(fz$country, fz$chart_date, collapse = "; "), "\n") }
-bad <- lag < 0 | (lag > 3 & !ce$chart_frozen)
-if (any(bad)) { st <- unique(data.frame(country = ce$country, chart_date = ce$chart_date, captured = substr(ce$captured_at, 1, 10), lag = lag)[bad, ])
-  print(st[order(st$country, st$captured), ], row.names = FALSE); stop("chart_entry: ", sum(bad), " rows whose chart_date is not 0-3 days before capture (above)") }
-# anchors that must hold on any day
-stopifnot("global chart has 200 positions" = all(table(ce$chart_date[ce$country == "global"] , ce$captured_at[ce$country == "global"]) %in% c(0L, 200L)),
-          "positions start at 1 with no gaps" = all(tapply(ce$pos, paste(ce$country, ce$captured_at), function(p) identical(sort(p), seq_along(p)))),
-          "totals: total >= peak-day streams" = all(ct$total_streams >= ct$peak_streams, na.rm = TRUE))
+check_capture <- function(x, name) {
+  why <- tryCatch({ assert_coverage(x, KEY[[name]], FL[[name]], name); "" }, error = function(e) conditionMessage(e))
+  if (nzchar(why)) return(why)
+  if (name == "chart_entry") {
+    lg <- x$chart_lag_days[1]
+    if (lg < 0 || (lg > 4 && !x$chart_frozen[1])) return(sprintf("chart_date %s is %d days before capture (allowed 0-4, or frozen > 30)", x$chart_date[1], lg))
+    if (!identical(sort(x$pos), seq_along(x$pos))) return("positions do not run 1..n with no gaps")
+    if (x$country[1] == "global" && nrow(x) != 200) return(sprintf("global chart has %d positions, not 200", nrow(x))) }
+  if (name == "chart_totals" && any(x$total_streams < x$peak_streams, na.rm = TRUE)) return("a total below its peak-day streams")
+  "" }
+quar <- list(); keep <- function(x, name) { s <- split(x, x$raw_file); ok <- character()
+  for (f in names(s)) { w <- check_capture(s[[f]], name); if (nzchar(w)) quar[[length(quar) + 1]] <<- data.frame(table = name, raw_file = f, captured_at = s[[f]]$captured_at[1], reason = w) else ok <- c(ok, f) }
+  x[x$raw_file %in% ok, ] }
+ce <- keep(ce, "chart_entry"); ct <- keep(ct, "chart_totals"); ar <- keep(ar, "artist_snapshot")
+for (nm in names(KEY)) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], FL[[nm]], nm)   # the kept rows, pooled (duplicate keys across captures)
+dir.create(db_dir, recursive = TRUE, showWarnings = FALSE); qf <- file.path(db_dir, "_quarantine.csv")
+if (length(quar)) { q <- do.call(rbind, quar); write.csv(q, qf, row.names = FALSE); cat("QUARANTINED", nrow(q), "capture(s), left out of the tables (", qf, "):\n"); print(q, row.names = FALSE)
+  newest <- max(substr(c(ce$captured_at, ct$captured_at, ar$captured_at, q$captured_at), 1, 10))
+  if (any(substr(q$captured_at, 1, 10) == newest)) stop("a capture from the newest day (", newest, ") failed its checks: see above") } else if (file.exists(qf)) file.remove(qf)
 
 write_month <- function(x, name, date_col) {
   x$month <- substr(x$captured_at, 1, 7)

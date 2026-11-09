@@ -8,7 +8,7 @@
 #' Parser version written on every parsed row
 #' @return Integer.
 #' @keywords internal
-kworb_parser_version <- function() 1L
+kworb_parser_version <- function() 2L   # 2 (9 Nov review): raw cells kept for top10_days and the artists' as_lead / solo / as_feature
 
 #' Number from a kworb cell
 #'
@@ -99,7 +99,7 @@ parse_chart_totals <- function(html, country) {
   kworb_check_header(t$header, c("Artist and Title", "Days", "T10", "Pk", "(x?)", "PkStreams", "Total"), paste("totals", country))
   x <- t$cells
   out <- cbind(kworb_title_cells(t$rows, 1),
-               data.frame(days = kworb_num(x[, 2]), top10_days = kworb_num(x[, 3]), peak_pos = kworb_num(x[, 4]), peak_count_raw = x[, 5],
+               data.frame(days = kworb_num(x[, 2]), top10_days_raw = x[, 3], top10_days = kworb_num(x[, 3]), peak_pos = kworb_num(x[, 4]), peak_count_raw = x[, 5],
                           peak_count = kworb_num(sub("^\\(x([0-9]+)\\)$", "\\1", x[, 5])), peak_streams = kworb_num(x[, 6]), total_streams = kworb_num(x[, 7]),
                           stringsAsFactors = FALSE))
   cov <- regmatches(html, regexpr("Covers charts from [0-9]{4}/[0-9]{2}/[0-9]{2} to [0-9]{4}/[0-9]{2}/[0-9]{2}", html))
@@ -124,6 +124,7 @@ parse_artists <- function(html) {
   x <- t$cells; a <- xml2::xml_find_first(t$rows, "./td[1]//a")
   out <- data.frame(artist_id = sub("^.*/artist/([A-Za-z0-9]+)(_songs)?\\.html$", "\\1", xml2::xml_attr(a, "href")), artist_name = xml2::xml_text(a),
                     streams_m = kworb_num(x[, 2]), daily_m = kworb_num(x[, 3]), as_lead_m = kworb_num(x[, 4]), solo_m = kworb_num(x[, 5]), as_feature_m = kworb_num(x[, 6]),
+                    as_lead_raw = x[, 4], solo_raw = x[, 5], as_feature_raw = x[, 6],   # blank on the page = NA here (0 not confirmed); the cell is kept
                     stringsAsFactors = FALSE)
   for (v in c("streams", "daily", "as_lead", "solo", "as_feature")) out[[v]] <- round(out[[paste0(v, "_m")]] * 1e6)
   out$streams_resolution <- 1e5; out$daily_resolution <- 1e3; out$rank <- seq_len(nrow(out))

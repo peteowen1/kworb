@@ -20,8 +20,8 @@ concurrency:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    # 80 requests x 3 s is about 4 minutes; allow for slow responses and setup
-    timeout-minutes: 25
+    # capture: 80 requests x 3 s, about 4 min; the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
+    timeout-minutes: 45
 
     env:
       # Needs write access to peteowen1/mediadata (a repo-scoped PAT; the
@@ -61,7 +61,9 @@ jobs:
         run: Rscript inst/scripts/capture_raw.R
 
       # Stage 2: rebuild this capture month's tables from every raw tar of the month (today's included) and replace
-      # the month's assets on mediadata release kworb-db. Runs only if the capture step succeeded.
+      # the month's assets on mediadata release kworb-db. Runs only if the capture step succeeded. Known edge: a manual
+      # dispatch that starts before and ends after midnight UTC on a month's last day files pages stamped in the new month
+      # under the old month's tar; the 21:30 UTC schedule (a ~5 min capture) never does that.
       - name: Rebuild and publish this month's tables (fails on any parse, coverage or upload problem)
         run: |
           month=$(date -u +%Y-%m)

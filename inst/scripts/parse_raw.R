@@ -23,7 +23,7 @@ if (!length(files)) stop("no raw files")
 # parsed: a rerun (or a run killed part way) reads them back instead of re-parsing (old artists pages hold 10,000 rows; the
 # 741 Wayback artists / totals copies took 9.5 min). A new parser version parses everything again.
 cache_dir <- file.path(db_dir, "_parsed"); dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_daily_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else NA_character_ }
+TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_(daily|weekly)_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else NA_character_ }
 parse_cached <- function(f) {
   cp <- file.path(cache_dir, paste0(sub("\\.html\\.gz$", "", basename(f)), "__v", kworb_parser_version(), ".parquet"))
   if (file.exists(cp)) return(list(table = TABLE_OF(f), rows = as.data.frame(read_parquet(cp))))
@@ -68,6 +68,7 @@ if (!is.null(ce) && any(ce$chart_frozen)) { fz <- unique(ce[ce$chart_frozen, c("
 # Pos | Artist | Total Streams (a3_chart), so those columns are NA by design and must not be floored (review 9 Nov)
 floors_for <- function(x, name) { f <- FL[[name]]
   if (name == "chart_entry" && identical(x$frequency[1], "weekly")) f <- c(f[setdiff(names(f), c("days", "streams_7day"))], weeks = 0.99)   # weekly pages: weeks, no 7-day columns
+  if (name == "chart_totals" && identical(x$frequency[1], "weekly")) f <- c(f[names(f) != "days"], weeks = 0.999)   # weekly totals count weeks, not days
   if (name == "artist_snapshot" && "layout" %in% names(x)) { lay <- x$layout[1]
     if (lay == "a5") f <- f[names(f) != "solo"]
     if (lay == "a3_chart") f <- f[c("artist_id", "artist_name", "streams")]
@@ -90,7 +91,7 @@ quar <- list(); keep <- function(x, name) { if (is.null(x)) return(NULL)
   for (f in names(s)) { w <- check_capture(s[[f]], name); if (nzchar(w)) quar[[length(quar) + 1]] <<- data.frame(table = name, raw_file = f, captured_at = s[[f]]$captured_at[1], reason = w) else ok <- c(ok, f) }
   x[x$raw_file %in% ok, ] }
 ce <- keep(ce, "chart_entry"); ct <- keep(ct, "chart_totals"); ar <- keep(ar, "artist_snapshot")
-for (nm in names(KEY)) if (present[[nm]]) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], if (nm == "artist_snapshot") FL[[nm]][c("artist_id", "artist_name", "streams")] else if (nm == "chart_entry") FL[[nm]][setdiff(names(FL[[nm]]), c("days", "streams_7day"))] else FL[[nm]], nm)   # per-capture checks cover the layout-specific columns   # the kept rows, pooled (duplicate keys across captures)
+for (nm in names(KEY)) if (present[[nm]]) assert_coverage(get(c(chart_entry = "ce", chart_totals = "ct", artist_snapshot = "ar")[[nm]]), KEY[[nm]], if (nm == "artist_snapshot") FL[[nm]][c("artist_id", "artist_name", "streams")] else if (nm %in% c("chart_entry", "chart_totals")) FL[[nm]][setdiff(names(FL[[nm]]), c("days", "streams_7day"))] else FL[[nm]], nm)   # per-capture checks cover the layout-specific columns   # the kept rows, pooled (duplicate keys across captures)
 dir.create(db_dir, recursive = TRUE, showWarnings = FALSE); qf <- file.path(db_dir, "_quarantine.csv")
 if (length(quar)) { q <- do.call(rbind, quar); write.csv(q, qf, row.names = FALSE)
   if (nzchar(Sys.getenv("GITHUB_ACTIONS"))) for (i in seq_len(nrow(q))) cat(sprintf("::warning title=kworb capture quarantined::%s %s: %s\n", q$table[i], q$raw_file[i], q$reason[i]))   # visible on a green run

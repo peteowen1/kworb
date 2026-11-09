@@ -2,7 +2,7 @@
 # Stage 1 raw capture (docs/plans/kworb-db.md).
 #
 # Fetches the kworb index page (https://kworb.net/spotify/), then the daily chart of every country the index
-# lists, global_daily_totals and artists.html. One request per page, 3 s apart,
+# lists, global_daily_totals, the global weekly chart and weekly totals, and artists.html. One request per page, 3 s apart,
 # bodies saved gzipped exactly as received. The day's files plus the manifest are
 # bundled into one tar and uploaded to a monthly release of the PRIVATE
 # peteowen1/mediadata repo (tag kworb-raw-YYYY-MM).
@@ -65,6 +65,10 @@ if (!isTRUE(attr(idx, "stopped")) && identical(as.integer(idx$http_status), 200L
 urls <- c(
   if (length(codes)) paste0(base, "country/", codes, "_daily.html"),
   paste0(base, "country/global_daily_totals.html"),
+  # weekly global chart and its totals (10 Nov: awards 178 ranks songs by weekly totals; Wayback holds only 64 copies of it
+  # since 2016). A weekly page describes the last chart week, so it may be up to 14 days old (below).
+  paste0(base, "country/global_weekly.html"),
+  paste0(base, "country/global_weekly_totals.html"),
   paste0(base, "artists.html")
 )
 if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
@@ -77,7 +81,7 @@ if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
   # The page must say the date we expect (within a day or two of today).
   dated <- man[!is.na(man$page_date) & man$page_date != "", ]
   age <- as.numeric(as.Date(format(started, "%Y-%m-%d", tz = "UTC")) - as.Date(dated$page_date))
-  stale <- dated$url[age < 0 | age > 4]
+  stale <- dated$url[age < 0 | age > ifelse(grepl("_weekly", dated$url), 14, 4)]
   for (u in stale) report(u, paste0("page date out of expected range: ", u))
   # A 200 whose body has no page date where one belongs (a country chart or the totals page) is an error, challenge or changed
   # layout, not data: only artists.html and the index legitimately carry none (review, 5 Nov)

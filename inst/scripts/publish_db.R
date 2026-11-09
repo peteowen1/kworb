@@ -8,7 +8,7 @@
 # afterwards: an asset missing or with the wrong size fails the run. Needs `gh` with write access (GH_TOKEN).
 args <- commandArgs(trailingOnly = TRUE)
 db_dir <- if (length(args) >= 1) args[1] else "data/db"
-months <- if (length(args) >= 2 && nzchar(args[2])) strsplit(args[2], ",")[[1]] else NULL
+months <- if (length(args) >= 2 && nzchar(args[2]) && args[2] != "all") strsplit(args[2], ",")[[1]] else NULL   # "all" (or empty) = every month; PowerShell drops an empty argument
 # arg 3: asset prefix after the table name, e.g. "wayback__" for the tables parsed from Wayback copies (data/db_wayback), so
 # the daily job, which rewrites <table>__<month>.parquet from live captures only, never overwrites them
 prefix <- if (length(args) >= 3) args[3] else ""

@@ -103,6 +103,10 @@ test_that("a short row that is not the last one still stops the parser", {
   expect_error(parse_artists(bad), "cells, not 6")
 })
 
+test_that("old chart pages put the date inside <strong>", {
+  expect_equal(parse_page_date('<span class="pagetitle"><strong>Spotify Daily Chart - Global - 2016/04/15</strong></span>'), as.Date("2016-04-15"))
+})
+
 test_that("Wayback file names give the archive's capture time and source", {
   d <- withr::local_tempdir(); f <- file.path(d, "artists__wb20190319180627.html.gz")
   con <- gzfile(f, "wb"); writeBin(charToRaw(artists_chart_page), con); close(con)

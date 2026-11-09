@@ -8,7 +8,7 @@
 #' Parser version written on every parsed row
 #' @return Integer.
 #' @keywords internal
-kworb_parser_version <- function() 3L   # 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
+kworb_parser_version <- function() 4L   # 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
 
 #' Number from a kworb cell
 #'
@@ -111,6 +111,30 @@ parse_daily_chart <- function(html, country) {
   out
 }
 
+#' Parse a saved weekly chart page (country/<code>_weekly.html)
+#'
+#' Same row shape as the daily chart, with weeks on the chart (`weeks`) in place of days and no 7-day columns; rows go to
+#' `chart_entry` with `frequency = "weekly"`. `chart_date` is the date in the page heading.
+#' @param html Page text.
+#' @param country Country code from the file name.
+#' @return Data frame, one row per chart position.
+#' @keywords internal
+parse_weekly_chart <- function(html, country) {
+  rd <- kworb_read_html(html); t <- kworb_table(rd$doc, drop_last = rd$incomplete); if (!is.null(t)) t$truncated <- t$truncated || rd$cut
+  if (is.null(t)) stop("weekly chart ", country, ": no table")
+  lay <- kworb_layout(t$header, list(w9 = c("Pos", "P+", "Artist and Title", "Wks", "Pk", "(x?)", "Streams", "Streams+", "Total")), paste("weekly chart", country))
+  x <- t$cells
+  out <- cbind(data.frame(pos = as.integer(x[, 1]), pos_change_raw = x[, 2], stringsAsFactors = FALSE), kworb_title_cells(t$rows, 3),
+               data.frame(weeks = kworb_num(x[, 4]), peak_pos = kworb_num(x[, 5]), peak_count_raw = x[, 6],
+                          peak_count = kworb_num(sub("^\\(x([0-9]+)\\)$", "\\1", x[, 6])), streams = kworb_num(x[, 7]),
+                          streams_change_raw = x[, 8], streams_change = kworb_num(x[, 8]), streams_total = kworb_num(x[, 9]), stringsAsFactors = FALSE))
+  pc <- out$pos_change_raw
+  out$pos_change_type <- ifelse(pc == "NEW", "new", ifelse(pc == "RE", "re-entry", ifelse(pc == "=", "same", ifelse(grepl("^[+-][0-9]+$", pc), "move", "other"))))
+  out$pos_change <- ifelse(out$pos_change_type == "same", 0, kworb_num(pc))
+  out$country <- country; out$frequency <- "weekly"; out$chart_date <- parse_page_date(html); out$layout <- lay; out$page_truncated <- t$truncated
+  out
+}
+
 #' Parse a saved "Totals" page (global daily totals)
 #'
 #' @param html Page text.
@@ -186,7 +210,10 @@ parse_raw_file <- function(path) {
   con <- gzfile(path, "rb"); raw <- readBin(con, "raw", file.info(path)$size * 40 + 1e6); close(con)
   html <- rawToChar(raw); Encoding(html) <- "UTF-8"
   m <- regmatches(slug, regexec("^country-([a-z]+)_daily(_totals)?$", slug))[[1]]
-  if (length(m)) {
+  wk <- regmatches(slug, regexec("^country-([a-z]+)_weekly$", slug))[[1]]
+  if (length(wk)) {
+    rows <- parse_weekly_chart(html, wk[2]); table <- "chart_entry"
+  } else if (length(m)) {
     rows <- if (nzchar(m[3])) parse_chart_totals(html, m[2]) else parse_daily_chart(html, m[2])
     table <- if (nzchar(m[3])) "chart_totals" else "chart_entry"
   } else if (slug == "artists") {

@@ -110,6 +110,22 @@ test_that("a short row that is not the last one still stops the parser", {
   expect_error(parse_artists(bad), "cells, not 6")
 })
 
+weekly_page <- paste0('<html><span class="pagetitle"><strong>Spotify Weekly Chart - Global - 2016/09/22</strong></span>',
+  '<table class="sortable"><thead><tr><th class="np">Pos</th><th class="np">P+</th><th class="mp text col-title">Artist and Title</th>',
+  '<th>Wks</th><th>Pk</th><th class="mini text">(x?)</th><th>Streams</th><th>Streams+</th><th>Total</th></tr></thead><tbody>',
+  '<tr><td class="np">1</td> <td class="np">=</td> <td class="text mp"><div><a href="../artist/69GGBxA162lTqCwzJG5jLp.html">The Chainsmokers</a> - ',
+  '<a href="../track/7BKLCZ1jbUBVqRi2FVlTVw.html">Closer</a> (w/ <a href="../artist/26VFTg2z8YR0cCuwLzESi2.html">Halsey</a>)</div></td> <td>8</td> <td>1</td>',
+  '<td class="np mini text">(x5)</td> <td>40,123,456</td> <td>-1,234,567</td> <td>310,000,000</td></tr></tbody></table></html>')
+
+test_that("weekly chart: weeks on chart, no 7-day columns, frequency weekly", {
+  x <- parse_weekly_chart(weekly_page, "global")
+  expect_equal(x$frequency, "weekly"); expect_equal(x$chart_date, as.Date("2016-09-22")); expect_equal(x$weeks, 8)
+  expect_equal(x$streams, 40123456); expect_equal(x$streams_change, -1234567); expect_equal(x$streams_total, 310000000)
+  expect_equal(x$feat_artist_names, "Halsey"); expect_equal(x$pos_change_type, "same"); expect_false("days" %in% names(x))
+  d <- withr::local_tempdir(); f <- file.path(d, "country-global_weekly__wb20160929160411.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(weekly_page), con); close(con); expect_equal(parse_raw_file(f)$table, "chart_entry")
+})
+
 test_that("old chart pages put the date inside <strong>", {
   expect_equal(parse_page_date('<span class="pagetitle"><strong>Spotify Daily Chart - Global - 2016/04/15</strong></span>'), as.Date("2016-04-15"))
 })

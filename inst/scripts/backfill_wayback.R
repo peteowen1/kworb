@@ -52,4 +52,6 @@ for (pg in pages) {
     fails <- if (ok) 0L else fails + 1L; if (fails >= 20) stop("20 failed requests in a row; stopping (last: ", u, " ", row$error, ")")
     if (i %% 50 == 0 || i == length(todo)) cat(format(Sys.time(), "%H:%M:%S"), pg, i, "of", length(todo), "| last served", served, "\n") } }
 m <- utils::read.csv(mf, colClasses = "character")
-cat(format(Sys.time(), "%H:%M:%S"), "done | requests in manifest:", nrow(m), "| saved:", sum(m$http_status == "200"), "| by page:\n"); print(table(m$page[m$http_status == "200"]))
+ok <- m$http_status %in% "200"   # NA status (transport error) is a failure, not NA in the count
+cat(format(Sys.time(), "%H:%M:%S"), "done | requests in manifest:", nrow(m), "| saved:", sum(ok), "| failed (retried on the next run):", sum(!ok), "| saved by page:
+"); print(table(m$page[ok]))

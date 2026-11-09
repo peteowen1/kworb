@@ -1,7 +1,7 @@
 # Publish the parsed tables (inst/scripts/parse_raw.R output) to the PRIVATE peteowen1/mediadata release `kworb-db`
 # (docs/plans/kworb-db.md 3.2: tables from a third party's pages stay private, as the raw captures do).
 #
-#   Rscript inst/scripts/publish_db.R [db_dir] [months]
+#   Rscript inst/scripts/publish_db.R [db_dir] [months] [asset_prefix]
 #   db_dir default data/db; months = comma-separated YYYY-MM to publish (default: every month in db_dir).
 # One asset per table per capture month: <table>__YYYY-MM.parquet (GitHub rewrites "=" in asset names). The daily job publishes only the current month,
 # replacing that month's assets (a closed month is never touched again). Each upload is checked by listing the release
@@ -9,6 +9,9 @@
 args <- commandArgs(trailingOnly = TRUE)
 db_dir <- if (length(args) >= 1) args[1] else "data/db"
 months <- if (length(args) >= 2 && nzchar(args[2])) strsplit(args[2], ",")[[1]] else NULL
+# arg 3: asset prefix after the table name, e.g. "wayback__" for the tables parsed from Wayback copies (data/db_wayback), so
+# the daily job, which rewrites <table>__<month>.parquet from live captures only, never overwrites them
+prefix <- if (length(args) >= 3) args[3] else ""
 repo <- Sys.getenv("MEDIADATA_REPO", "peteowen1/mediadata"); tag <- "kworb-db"
 gh <- function(a) { out <- suppressWarnings(system2("gh", a, stdout = TRUE, stderr = TRUE)); list(rc = attr(out, "status") %||% 0L, out = out) }
 `%||%` <- function(x, y) if (is.null(x)) y else x
@@ -16,7 +19,7 @@ parts <- list.files(db_dir, "^part\\.parquet$", recursive = TRUE, full.names = T
 info <- data.frame(path = parts, table = basename(dirname(dirname(parts))), month = sub("^month=", "", basename(dirname(parts))), stringsAsFactors = FALSE)
 if (!is.null(months)) info <- info[info$month %in% months, ]
 if (!nrow(info)) stop("nothing to publish in ", db_dir, if (!is.null(months)) paste(" for", paste(months, collapse = ",")))
-info$asset <- sprintf("%s__%s.parquet", info$table, info$month)   # no "=": GitHub turns it into "."
+info$asset <- sprintf("%s__%s%s.parquet", info$table, prefix, info$month)   # no "=": GitHub turns it into "."
 if (gh(c("release", "view", tag, "-R", repo))$rc != 0) {
   cr <- gh(c("release", "create", tag, "-R", repo, "--title", tag, "--notes", shQuote("kworb database tables (kworb repo, inst/scripts/parse_raw.R): one parquet per table per capture month.")))
   if (cr$rc != 0) stop("could not create release ", tag, ": ", paste(cr$out, collapse = " ")) }

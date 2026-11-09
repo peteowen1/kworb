@@ -70,6 +70,47 @@ test_that("parse_raw_file picks the table from the file name and adds both clock
   expect_true(is.na(parse_raw_file(g)$table))
 })
 
+# older layouts, as the Wayback Machine holds them (artists__wb20190319, country-global_daily_totals__wb2016...)
+artists_chart_page <- paste0('<html><table><colgroup><col class="col-pos"></colgroup><tr><th>Pos</th><th class="text">Artist</th><th>Total Streams</th></tr> ',
+  '<tr class="d0"><td>1</td><td class="text"><div><a href="artist/3TVXtAsR1Inumwj472S9r4.html">Drake</a></div></td><td>16,396,856,485</td></tr> ',
+  '<tr class="d1"><td>2</td><td class="text"><div><a href="artist/6eUKZXaKkcviH0Ku9w2n3V.html">Ed Sheeran</a></div></td><td>10,083,293,261</td></tr> ',
+  '<tr class="d0"><td>3</td><td class="text"><div><a href="artist/"></a></div></td></tr></table></html>')   # cut off mid-row, as archived
+artists_a5_page <- sub("<th>Solo</th> ", "", sub('<td class="smaller">56,287.0</td> ', "", sub('<td class="smaller">118,300.9</td> ', "", artists_page, fixed = TRUE), fixed = TRUE), fixed = TRUE)
+totals_pos_page <- sub('<th class="text">Artist and Title</th>', '<th class="np">Pos</th><th class="text">Artist and Title</th>',
+  gsub('<tr> <td class="text mp">', '<tr class="d1"><td class="np">7</td> <td class="text mp">', totals_page, fixed = TRUE), fixed = TRUE)
+
+test_that("artists before Apr 2023: chart-time totals, exact integers, a cut-off last row dropped", {
+  x <- parse_artists(artists_chart_page)
+  expect_equal(nrow(x), 2); expect_equal(x$artist_id, c("3TVXtAsR1Inumwj472S9r4", "6eUKZXaKkcviH0Ku9w2n3V"))
+  expect_equal(x$streams, c(16396856485, 10083293261)); expect_equal(x$streams_resolution[1], 1); expect_equal(x$era[1], "chart")
+  expect_true(all(is.na(x$daily))); expect_equal(x$page_pos, 1:2); expect_true(x$page_truncated[1]); expect_equal(x$layout[1], "a3_chart")
+})
+
+test_that("artists Apr-May 2023 (no Solo column) and today's layout", {
+  x <- parse_artists(artists_a5_page)
+  expect_equal(x$layout[1], "a5"); expect_true(all(is.na(x$solo))); expect_equal(x$as_feature[1], 44714100000); expect_equal(x$era[1], "all")
+  y <- parse_artists(artists_page); expect_equal(y$layout[1], "a6"); expect_false(y$page_truncated[1])
+})
+
+test_that("totals pages before 2023 lead with Pos; the rest of the row is unchanged", {
+  x <- parse_chart_totals(totals_pos_page, "global")
+  expect_equal(x$layout[1], "t8_pos"); expect_equal(x$page_pos, c(7L, 7L)); expect_equal(x$total_streams, c(5576476177, 4378259987))
+  expect_equal(x$title, c("Blinding Lights", "Sweater Weather")); expect_equal(x$top10_days, c(446, NA))
+})
+
+test_that("a short row that is not the last one still stops the parser", {
+  bad <- sub('<td class="smaller">99,625.8</td> ', "", artists_page, fixed = TRUE)
+  expect_error(parse_artists(bad), "cells, not 6")
+})
+
+test_that("Wayback file names give the archive's capture time and source", {
+  d <- withr::local_tempdir(); f <- file.path(d, "artists__wb20190319180627.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(artists_chart_page), con); close(con)
+  r <- parse_raw_file(f)
+  expect_equal(r$table, "artist_snapshot"); expect_equal(r$rows$captured_at[1], "2019-03-19T18:06:27Z"); expect_equal(r$rows$source[1], "wayback")
+  expect_equal(r$rows$snapshot_date[1], as.Date("2019-03-19"))
+})
+
 test_that("assert_coverage fails on an empty column, a duplicate key and no rows", {
   x <- data.frame(k = 1:3, a = c("x", "y", "z"), b = c(1, NA, NA), stringsAsFactors = FALSE)
   expect_silent(assert_coverage(x, "k", c(a = 1)))

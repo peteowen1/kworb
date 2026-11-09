@@ -1,7 +1,7 @@
 name: Capture raw kworb pages
 
 # Stage 1 of docs/plans/kworb-db.md. Saves the 77 country daily charts,
-# global_daily_totals and artists.html exactly as received, and uploads one tar
+# global_daily_totals, the global weekly chart and weekly totals, and artists.html exactly as received, and uploads one tar
 # plus manifest to a monthly release of the PRIVATE peteowen1/mediadata repo.
 
 on:
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    # capture: 80 requests x 3 s, about 4 min; the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
+    # capture: 82 requests x 3 s, about 4 min; the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
     timeout-minutes: 45
 
     env:

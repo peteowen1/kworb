@@ -2,7 +2,8 @@
 # Stage 1 raw capture (docs/plans/kworb-db.md).
 #
 # Fetches the kworb index page (https://kworb.net/spotify/), then the daily chart of every country the index
-# lists, global_daily_totals, the global weekly chart and weekly totals, and artists.html. One request per page, 3 s apart,
+# lists, global_daily_totals, the global weekly chart and weekly totals, artists.html, then the track page of every song on
+# today's global daily chart (KWORB_TRACKS, default 200; 0 = none). One request per page, 3 s apart,
 # bodies saved gzipped exactly as received. The day's files plus the manifest are
 # bundled into one tar and uploaded to a monthly release of the PRIVATE
 # peteowen1/mediadata repo (tag kworb-raw-YYYY-MM).
@@ -12,7 +13,7 @@
 #
 # Environment: GH_TOKEN (needs write access to the mediadata repo; `gh` CLI),
 # MEDIADATA_REPO (default peteowen1/mediadata), KWORB_DELAY (default 3),
-# KWORB_RAW_ROOT (default tempdir), KWORB_SKIP_UPLOAD=1 to only capture.
+# KWORB_RAW_ROOT (default tempdir), KWORB_SKIP_UPLOAD=1 to only capture, KWORB_TRACKS (default 200).
 
 suppressMessages(library(kworb))
 
@@ -71,6 +72,7 @@ urls <- c(
   paste0(base, "country/global_weekly_totals.html"),
   paste0(base, "artists.html")
 )
+man <- NULL
 if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
   man <- fetch_raw_pages(urls, out_dir, delay = delay)
   if (isTRUE(attr(man, "stopped"))) {
@@ -89,17 +91,45 @@ if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
   for (u in undated) report(u, paste0("200 with no page date (error or changed page?): ", u))
 }
 
+# 2b. Track pages (plan Stage 4, 10 Nov 2026: the old daily-scrape.yml that fetched them is retired). One page per track on
+# today's global daily chart (200), saved raw like every other page. A track page holds the last 31 days per country plus
+# one row per charted week, so a daily capture of the current top 200 loses nothing; parsing them into track_daily /
+# track_weekly is a later step (parse_raw.R skips page types with no parser). KWORB_TRACKS caps the count (0 = none).
+n_tracks <- suppressWarnings(as.integer(Sys.getenv("KWORB_TRACKS", "200"))); if (is.na(n_tracks)) n_tracks <- 200L
+track_urls <- character()
+gd <- if (!is.null(man)) man[grepl("/country/global_daily\\.html$", man$url) & man$http_status %in% 200L, ] else NULL
+stopped <- file.exists(file.path(out_dir, "STOP"))
+if (n_tracks > 0 && !is.null(gd) && nrow(gd) == 1 && !stopped) {
+  # an unreadable chart (a 200 challenge page, a changed layout) must not abort before the tar and upload (review, 10 Nov)
+  ids <- tryCatch({
+    con <- gzfile(file.path(out_dir, gd$file), "rb"); html <- rawToChar(readBin(con, "raw", 5e7)); close(con)
+    unique(kworb:::parse_daily_chart(html, "global")$track_id)   # internal parser (not exported)
+  }, error = function(e) { note("could not read track ids from the global daily chart: ", conditionMessage(e)); character() })
+  ids <- ids[!is.na(ids) & grepl("^[0-9A-Za-z]{22}$", ids)]
+  if (length(ids) < 150) note("global daily chart gave only ", length(ids), " valid track ids (expected about 200)")
+  track_urls <- if (length(ids)) paste0(base, "track/", head(ids, n_tracks), ".html") else character()
+  message("Track pages: ", length(track_urls))
+  tm <- if (length(track_urls)) fetch_raw_pages(track_urls, out_dir, delay = delay) else data.frame(url = character(), http_status = integer())
+  if (isTRUE(attr(tm, "stopped"))) note("track pages stopped by HTTP 429/403; not attempted: ", length(attr(tm, "not_attempted")))
+  tbad <- tm[is.na(tm$http_status) | tm$http_status != 200L, ]
+  # a few dead track pages are not a failed day; more than 5 means something is wrong
+  if (nrow(tbad)) message("track pages not 200: ", nrow(tbad), " (", paste(head(basename(tbad$url), 5), collapse = ", "), ")")
+  if (nrow(tbad) > 5) note(nrow(tbad), " of ", length(track_urls), " track pages failed")
+} else if (n_tracks > 0 && !stopped) {
+  note("no track pages captured: today's global daily chart was not fetched")
+}   # after a STOP the stop note already fails the run
+
 # 3. Bundle: files + manifest in one tar.
 manifest <- utils::read.csv(file.path(out_dir, "manifest.csv"), stringsAsFactors = FALSE)
 message(sprintf("%d requests, %d ok", nrow(manifest), sum(manifest$http_status %in% 200L)))
-if (length(codes) && nrow(manifest) != length(urls) + 1L) {
-  note("manifest has ", nrow(manifest), " rows, expected ", length(urls) + 1L)
+if (length(codes) && nrow(manifest) != length(urls) + 1L + length(track_urls)) {
+  note("manifest has ", nrow(manifest), " rows, expected ", length(urls) + 1L + length(track_urls))
 }
 tar_name <- paste0("kworb-raw-", run_ts, ".tar")
 man_name <- paste0("kworb-raw-manifest-", run_ts, ".csv")
 tar_path <- file.path(root, tar_name)
 man_path <- file.path(root, man_name)
-file.copy(file.path(out_dir, "manifest.csv"), man_path, overwrite = TRUE)
+invisible(file.copy(file.path(out_dir, "manifest.csv"), man_path, overwrite = TRUE))   # Rscript prints a bare TRUE otherwise
 rc <- system2("tar", c("-cf", shQuote(tar_path), "-C", shQuote(out_dir), "."))
 if (rc != 0 || !file.exists(tar_path)) note("tar failed")
 n_files <- length(list.files(out_dir, pattern = "\\.gz$"))

@@ -17,7 +17,7 @@ pages <- if (length(args) >= 2) strsplit(args[2], ",")[[1]] else c("artists.html
 if (file.exists("DESCRIPTION") && requireNamespace("devtools", quietly = TRUE)) devtools::load_all(".", quiet = TRUE) else library(kworb)
 dir.create(file.path(out_dir, "cdx"), recursive = TRUE, showWarnings = FALSE)
 if (file.exists(file.path(out_dir, "STOP"))) stop("STOP marker present in ", out_dir, ": ", paste(readLines(file.path(out_dir, "STOP")), collapse = " "))
-ua <- raw_user_agent(); DELAY <- 3
+ua <- kworb:::raw_user_agent(); DELAY <- 3
 mf <- file.path(out_dir, "manifest.csv")
 done <- if (file.exists(mf)) { m <- utils::read.csv(mf, colClasses = "character"); m$requested_ts[m$http_status %in% "200"] } else character()
 get <- function(url) { r <- tryCatch(httr::GET(url, httr::user_agent(ua), httr::timeout(90)), error = function(e) e)
@@ -29,7 +29,7 @@ stop_if_blocked <- function(st, url) if (!is.na(st) && st %in% c(429L, 403L)) {
   stop("HTTP ", st, " from ", url, ": stopped (marker ", file.path(out_dir, "STOP"), ")") }
 first <- TRUE; fails <- 0L
 for (pg in pages) {
-  slug <- raw_slug(paste0("https://kworb.net/spotify/", pg))
+  slug <- kworb:::raw_slug(paste0("https://kworb.net/spotify/", pg))
   cdx_url <- paste0("https://web.archive.org/cdx/search/cdx?url=kworb.net/spotify/", pg, "&output=json&fl=timestamp,statuscode,length,digest&filter=statuscode:200&collapse=timestamp:8")
   if (!first) Sys.sleep(DELAY); first <- FALSE
   r <- get(cdx_url); stop_if_blocked(r$status, cdx_url)

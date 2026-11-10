@@ -25,7 +25,7 @@ if (!length(files)) stop("no raw files")
 cache_dir <- file.path(db_dir, "_parsed"); dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_(daily|weekly)_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else NA_character_ }
 parse_cached <- function(f) {
-  cp <- file.path(cache_dir, paste0(sub("\\.html\\.gz$", "", basename(f)), "__v", kworb_parser_version(), ".parquet"))
+  cp <- file.path(cache_dir, paste0(sub("\\.html\\.gz$", "", basename(f)), "__v", kworb:::kworb_parser_version(), ".parquet"))
   if (file.exists(cp)) return(list(table = TABLE_OF(f), rows = as.data.frame(read_parquet(cp))))
   r <- parse_raw_file(f); if (!is.na(r$table)) { tmp <- paste0(cp, ".tmp"); write_parquet(r$rows, tmp); file.rename(tmp, cp) }; r }   # atomic: a kill mid-write leaves no corrupt cache file
 t0 <- Sys.time(); res <- lapply(files, function(f) tryCatch(parse_cached(f), error = function(e) list(table = "ERROR", rows = NULL, error = conditionMessage(e), file = basename(f))))

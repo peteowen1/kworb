@@ -95,25 +95,29 @@ if (!isTRUE(attr(idx, "stopped")) && !file.exists(file.path(out_dir, "STOP"))) {
 # today's global daily chart (200), saved raw like every other page. A track page holds the last 31 days per country plus
 # one row per charted week, so a daily capture of the current top 200 loses nothing; parsing them into track_daily /
 # track_weekly is a later step (parse_raw.R skips page types with no parser). KWORB_TRACKS caps the count (0 = none).
-n_tracks <- as.integer(Sys.getenv("KWORB_TRACKS", "200"))
+n_tracks <- suppressWarnings(as.integer(Sys.getenv("KWORB_TRACKS", "200"))); if (is.na(n_tracks)) n_tracks <- 200L
 track_urls <- character()
 gd <- if (!is.null(man)) man[grepl("/country/global_daily\\.html$", man$url) & man$http_status %in% 200L, ] else NULL
-if (n_tracks > 0 && !is.null(gd) && nrow(gd) == 1 && !file.exists(file.path(out_dir, "STOP"))) {
-  con <- gzfile(file.path(out_dir, gd$file), "rb"); html <- rawToChar(readBin(con, "raw", 5e7)); close(con)
-  ids <- unique(kworb:::parse_daily_chart(html, "global")$track_id)   # internal parser (not exported)
+stopped <- file.exists(file.path(out_dir, "STOP"))
+if (n_tracks > 0 && !is.null(gd) && nrow(gd) == 1 && !stopped) {
+  # an unreadable chart (a 200 challenge page, a changed layout) must not abort before the tar and upload (review, 10 Nov)
+  ids <- tryCatch({
+    con <- gzfile(file.path(out_dir, gd$file), "rb"); html <- rawToChar(readBin(con, "raw", 5e7)); close(con)
+    unique(kworb:::parse_daily_chart(html, "global")$track_id)   # internal parser (not exported)
+  }, error = function(e) { note("could not read track ids from the global daily chart: ", conditionMessage(e)); character() })
   ids <- ids[!is.na(ids) & grepl("^[0-9A-Za-z]{22}$", ids)]
   if (length(ids) < 150) note("global daily chart gave only ", length(ids), " valid track ids (expected about 200)")
-  track_urls <- paste0(base, "track/", head(ids, n_tracks), ".html")
+  track_urls <- if (length(ids)) paste0(base, "track/", head(ids, n_tracks), ".html") else character()
   message("Track pages: ", length(track_urls))
-  tm <- fetch_raw_pages(track_urls, out_dir, delay = delay)
+  tm <- if (length(track_urls)) fetch_raw_pages(track_urls, out_dir, delay = delay) else data.frame(url = character(), http_status = integer())
   if (isTRUE(attr(tm, "stopped"))) note("track pages stopped by HTTP 429/403; not attempted: ", length(attr(tm, "not_attempted")))
   tbad <- tm[is.na(tm$http_status) | tm$http_status != 200L, ]
   # a few dead track pages are not a failed day; more than 5 means something is wrong
   if (nrow(tbad)) message("track pages not 200: ", nrow(tbad), " (", paste(head(basename(tbad$url), 5), collapse = ", "), ")")
   if (nrow(tbad) > 5) note(nrow(tbad), " of ", length(track_urls), " track pages failed")
-} else if (n_tracks > 0) {
+} else if (n_tracks > 0 && !stopped) {
   note("no track pages captured: today's global daily chart was not fetched")
-}
+}   # after a STOP the stop note already fails the run
 
 # 3. Bundle: files + manifest in one tar.
 manifest <- utils::read.csv(file.path(out_dir, "manifest.csv"), stringsAsFactors = FALSE)

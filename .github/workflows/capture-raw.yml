@@ -20,7 +20,7 @@ concurrency:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    # capture: 82 requests x 3 s, about 4 min; the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
+    # capture: 82 requests + 200 track pages x 3 s, about 14 min (10 Nov); the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
     timeout-minutes: 45
 
     env:

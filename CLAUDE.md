@@ -48,6 +48,9 @@ inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / glob
 - **Two eras on the artists page, never mix:** `era = "chart"` (to Mar 2023: streams while on the charts, exact integers) and
   `era = "all"` (from Apr 2023: every stream, millions to 0.1). `layout` names the page layout the row came from.
 - Cut-off archive copies are parsed up to the cut and flagged `page_truncated`; frozen markets (Cyprus, Malta, Russia) `chart_frozen`.
+- **`inst/scripts/*.R` must call unexported functions as `kworb:::name`.** Locally they run under `devtools::load_all()`, where a
+  bare internal name works; the capture-raw workflow runs them on the installed package, where it does not (10 Nov 2026: a bare
+  `kworb_parser_version()` failed the CI rebuild on 834 of 834 files; fixed in kworb#13). Test a script from outside the repo root.
 - `kworb_db_summary(db_dir)` lists tables x months x rows. Local folders: `data/raw`, `data/raw_wayback`, `data/db`, `data/db_wayback`
   (all under `data/`, gitignored).
 

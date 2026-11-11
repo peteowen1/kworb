@@ -35,7 +35,7 @@ The old scrape pipeline above is mostly broken (plan section 1.1) and is being r
 capture-raw.yml (daily 21:30 UTC, on master)
   inst/scripts/capture_raw.R   → raw pages saved exactly as received → mediadata release kworb-raw-YYYY-MM (one tar + manifest a run)
   inst/scripts/parse_raw.R     → parse_raw_file() per page → checks PER CAPTURE (bad captures → <db>/_quarantine.csv, the run
-                                 fails only if the newest day's capture is bad) → <db>/<table>/month=<capture month>/part.parquet
+                                 fails only if the newest day's capture is bad; track pages: more than 5 bad on the newest day) → <db>/<table>/month=<capture month>/part.parquet
   inst/scripts/publish_db.R    → mediadata release kworb-db: <table>__YYYY-MM.parquet (sizes verified)
 inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / global daily / weekly / daily totals → data/raw_wayback/
                                  (<slug>__wb<archive ts>.html.gz + manifest.csv); parsed to data/db_wayback, published as

@@ -43,7 +43,12 @@ inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / glob
 ```
 
 - Tables: `chart_entry` (daily top-200, 77 countries), `chart_totals` (global daily Totals), `artist_snapshot` (artists.html,
-  no page date: dated by capture). Every row has both clocks: the day the numbers describe (`chart_date` / `snapshot_date`) and
+  no page date: dated by capture), `track_chart` (track pages: one row per track x chart x date, collapsed over the month's
+  captures with `first_captured_at` / `last_captured_at`, `n_obs` and first / last values; as-of uses `first_captured_at` and the
+  `*_first` values) and `track_page_summary` (each track page capture's Total and Peak rows, every capture kept).
+- **Track pages:** the daily table is the last 31 ROWS (days the track charted anywhere), not the last 31 days, so it can reach
+  back a year. Weekly dates are Sundays to 22 Mar 2015, Thursdays after. Weekly charts of 22 Mar - 30 Jul 2015 run past 200.
+  The Global weekly Total is not the sum of the weekly rows (154 of 200 pages, 11 Nov): stored as the page states it. Every row has both clocks: the day the numbers describe (`chart_date` / `snapshot_date`) and
   `captured_at` (for Wayback: when the archive captured it). An as-of query must use `captured_at <= date`.
 - **Two eras on the artists page, never mix:** `era = "chart"` (to Mar 2023: streams while on the charts, exact integers) and
   `era = "all"` (from Apr 2023: every stream, millions to 0.1). `layout` names the page layout the row came from.

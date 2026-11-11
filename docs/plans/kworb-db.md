@@ -226,7 +226,7 @@ Done means: tests green, `kworb_db_summary()` shows non-empty, correctly dated r
 
 **Stage 3: `as_of()` and Wayback backfill B1 to B4.** First consumer: swap awards 157's artist lookup for `kworb_asof()` and compare to its current output on the 59th to 68th ceremonies (differences should be exactly the leak cases in 2.2).
 
-**Stage 4: track-level.** `_songs` rotation for the awards watchlist, track-page rotation, B6 and B7, `track_daily`/`track_weekly`. Retire the old package's scrape path, fix D2 and D12 or delete the functions it superseded.
+**Stage 4: track-level.** (11 Nov 2026: track pages of the global top 200 captured daily since 10 Nov and parsed into `track_chart` / `track_page_summary` by `parse_raw.R`; `_songs` rotation, B6 / B7 backfills and the old scrape path still to do.) `_songs` rotation for the awards watchlist, track-page rotation, B6 and B7, `track_daily`/`track_weekly`. Retire the old package's scrape path, fix D2 and D12 or delete the functions it superseded.
 
 **Stage 5: housekeeping.** Remove the old `data` release (999 assets) after the new DB has the 151 chart files re-imported (they are the only record of Dec 2025 to Nov 2026 apart from Wayback), fix D18, `main` PR, projection models re-pointed at `kworb_asof()`.
 

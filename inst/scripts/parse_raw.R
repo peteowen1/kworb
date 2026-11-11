@@ -129,6 +129,7 @@ check_track <- function(x) {
   if (nzchar(why)) return(why)
   if (any(x$cell_odd)) return(sprintf("%d cells do not read as 'position (streams)', e.g. '%s'", sum(x$cell_odd), x$cell_raw[x$cell_odd][1]))
   d <- x[x$row_type == "date", ]
+  if (anyNA(d$chart_date)) return("a date row whose label is not a real date")
   if (any(d$chart_date > as.Date(substr(x$captured_at[1], 1, 10)))) return("a chart date after the capture")
   # weekly charts of 22 Mar - 30 Jul 2015 ran past 200 (to 329; 629 cells on 200 pages, 11 Nov): allowed there only
   big <- d$position > 200 & !(d$frequency == "weekly" & d$chart_date < as.Date("2015-08-01"))
@@ -143,7 +144,11 @@ if (length(track_files)) {
   ID <- c("track_id", "frequency", "country", "chart_date", "cap_month")   # collapsed within a capture month, so each month's file stands alone
   for (dd in sort(unique(day))) {
     r <- lapply(track_files[day == dd], function(f) tryCatch(parse_cached(f), error = function(e) list(table = "ERROR", error = conditionMessage(e), file = basename(f))))
-    er <- Filter(function(z) identical(z$table, "ERROR"), r); if (length(er)) { for (e in er) message("PARSE ERROR ", e$file, ": ", e$error); stop(length(er), " track pages failed to parse") }
+    # a page that does not parse is quarantined like one that fails its checks (review 11 Nov): one odd page among ~6,000 a
+    # month must not block every later rebuild; only more than 5 bad pages on the newest day fail the run
+    for (e in Filter(function(z) identical(z$table, "ERROR"), r)) { message("PARSE ERROR ", e$file, ": ", e$error)
+      tquar[[length(tquar) + 1]] <- data.frame(table = "track_chart", raw_file = e$file, captured_at = format(as.POSIXct(sub("^.*__([0-9]{8}T[0-9]{6}Z)\\.html\\.gz$", "\\1", e$file), format = "%Y%m%dT%H%M%SZ", tz = "UTC"), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"), reason = paste("parse error:", e$error)) }
+    r <- Filter(function(z) !identical(z$table, "ERROR"), r)
     ok <- list()
     for (z in r) { w <- check_track(z$rows); if (nzchar(w)) tquar[[length(tquar) + 1]] <- data.frame(table = "track_chart", raw_file = z$rows$raw_file[1], captured_at = z$rows$captured_at[1], reason = w) else ok[[length(ok) + 1]] <- z$rows }
     if (!length(ok)) next

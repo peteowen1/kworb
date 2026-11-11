@@ -162,3 +162,46 @@ test_that("assert_coverage fails on an empty column, a duplicate key and no rows
   expect_error(assert_coverage(rbind(x, x[1, ]), "k", c(a = 1)), "duplicate key")
   expect_error(assert_coverage(x[0, ], "k", c(a = 1)), "no rows")
 })
+
+# track page (track/<id>.html, 11 Nov 2026): a weekly and a daily table, Date + one column per chart; Total and Peak rows first
+cell <- function(p, s) paste0('<td>\n<span class="p">', p, '</span><span class="b"> (</span><span class="s">', s, '</span><span class="b">)</span>\n</td>')
+track_page <- function(weekly = TRUE, odd = FALSE) paste0(
+  '<html><body><div class="subcontainer"><span class="pagetitle">Spotify Chart History</span><br><br>\nTitle: Mr. Brightside<br>\n',
+  'Artist: <a href="../artist/0C0XlULifJtAgn6ZNCW2eu.html">The Killers</a>\n<br><br>\n',
+  '<div class="weekly">\n<table>\n<tr><th>Date</th>\n', if (weekly) '<th>Global</th>\n<th>US</th>\n', '</tr>\n',
+  '<tr class="s tot">\n<td>Total</td>\n', if (weekly) '<td>2,000</td>\n<td>700</td>\n', '</tr>\n',
+  '<tr class="pr">\n<td>Peak</td>\n', if (weekly) paste0(cell(26, "1,200"), "\n", cell(5, "700"), "\n"), '</tr>\n',
+  if (weekly) paste0('<tr>\n<td>2014/10/26</td>\n', cell(191, 800), '\n<td>--</td>\n</tr>\n<tr>\n<td>2014/11/02</td>\n', cell(26, "1,200"), '\n', cell(5, 700), '\n</tr>\n'),
+  '</table>\n</div>\n<div class="daily">\n<table>\n<tr><th>Date</th>\n<th>Global</th>\n</tr>\n<tr class="s tot">\n<td>Total</td>\n<td>9,000</td>\n</tr>\n',
+  '<tr class="pr">\n<td>Peak</td>\n', cell(22, "300"), '\n</tr>\n<tr>\n<td>2026/11/09</td>\n', if (odd) '<td>?? odd</td>' else cell(25, "213"), '\n</tr>\n</table>\n</div>\n</div></body></html>')
+
+test_that("track page: one row per filled cell, '--' left out, Total and Peak rows typed", {
+  x <- parse_track_page(track_page(), "003vvx7Niy0yvhvHt4a68B")
+  expect_equal(nrow(x), 3 + 2 + 2 + 3)   # weekly: 3 dated cells (one '--' dropped), 2 Totals, 2 Peaks; daily: 1 + Total + Peak
+  w <- x[x$frequency == "weekly" & x$row_type == "date", ]
+  expect_equal(w$country, c("global", "global", "us")); expect_equal(w$chart_date, as.Date(c("2014-10-26", "2014-11-02", "2014-11-02")))
+  expect_equal(w$position, c(191L, 26L, 5L)); expect_equal(w$streams, c(800, 1200, 700))
+  tot <- x[x$row_type == "total" & x$frequency == "weekly", ]; expect_equal(tot$streams, c(2000, 700)); expect_true(all(is.na(tot$chart_date)))
+  pk <- x[x$row_type == "peak" & x$country == "global" & x$frequency == "weekly", ]; expect_equal(c(pk$position, pk$streams), c(26, 1200))
+  expect_equal(unique(x$title), "Mr. Brightside"); expect_equal(unique(x$artist_ids), "0C0XlULifJtAgn6ZNCW2eu"); expect_equal(unique(x$artist_names), "The Killers")
+  expect_false(any(x$cell_odd))
+})
+
+test_that("track page: a track new this week (weekly table of Date only) gives daily rows only", {
+  x <- parse_track_page(track_page(weekly = FALSE), "003vvx7Niy0yvhvHt4a68B")
+  expect_equal(unique(x$frequency), "daily"); expect_equal(nrow(x), 3)
+})
+
+test_that("track page: an unreadable cell is kept raw and flagged; a changed header stops", {
+  x <- parse_track_page(track_page(odd = TRUE), "003vvx7Niy0yvhvHt4a68B")
+  o <- x[x$cell_odd, ]; expect_equal(nrow(o), 1); expect_equal(o$cell_raw, "?? odd"); expect_true(is.na(o$streams))
+  expect_error(parse_track_page(sub("<th>Date</th>", "<th>Week</th>", track_page(), fixed = TRUE), "x"), "header changed")
+})
+
+test_that("parse_raw_file sends track-<id> files to track_chart", {
+  d <- withr::local_tempdir(); f <- file.path(d, "track-003vvx7Niy0yvhvHt4a68B__20261111T013145Z.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(track_page()), con); close(con)
+  r <- parse_raw_file(f)
+  expect_equal(r$table, "track_chart"); expect_equal(unique(r$rows$track_id), "003vvx7Niy0yvhvHt4a68B")
+  expect_equal(r$rows$captured_at[1], "2026-11-11T01:31:45Z"); expect_equal(r$rows$parser_version[1], 6L)
+})

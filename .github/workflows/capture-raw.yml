@@ -20,8 +20,9 @@ concurrency:
 jobs:
   capture:
     runs-on: ubuntu-latest
-    # capture: 82 requests + 200 track pages x 3 s, about 14 min (10 Nov); the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st
-    timeout-minutes: 45
+    # capture: 82 requests + 200 track pages x 3 s, about 14 min (10 Nov); the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st,
+    # plus track pages (0.13 s each, 11 Nov: 200 a day, ~14 min by the 31st) when the parse cache below is missing
+    timeout-minutes: 60
 
     env:
       # Needs write access to peteowen1/mediadata (a repo-scoped PAT; the
@@ -64,6 +65,19 @@ jobs:
       # the month's assets on mediadata release kworb-db. Runs only if the capture step succeeded. Known edge: a manual
       # dispatch that starts before and ends after midnight UTC on a month's last day files pages stamped in the new month
       # under the old month's tar; the 21:30 UTC schedule (a ~5 min capture) never does that.
+      # Each raw file's parsed rows (data/db/_parsed/<file>__v<parser version>.parquet) are kept between runs, so a run parses
+      # only the day's new pages. A missing or stale cache only costs time: every file it lacks is parsed again.
+      - name: Capture month
+        id: month
+        run: echo "month=$(date -u +%Y-%m)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the parse cache
+        uses: actions/cache@v4
+        with:
+          path: data/db/_parsed
+          key: kworb-parsed-${{ steps.month.outputs.month }}-${{ github.run_id }}
+          restore-keys: kworb-parsed-${{ steps.month.outputs.month }}-
+
       - name: Rebuild and publish this month's tables (fails on any parse, coverage or upload problem)
         run: |
           month=$(date -u +%Y-%m)

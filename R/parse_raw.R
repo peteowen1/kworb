@@ -8,7 +8,7 @@
 #' Parser version written on every parsed row
 #' @return Integer.
 #' @keywords internal
-kworb_parser_version <- function() 5L   # 5: global weekly totals pages (chart_totals, frequency weekly; weeks / top10_weeks). 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
+kworb_parser_version <- function() 6L   # 6: track pages (track_chart / track_page_summary). 5: global weekly totals pages (chart_totals, frequency weekly; weeks / top10_weeks). 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
 
 #' Number from a kworb cell
 #'
@@ -200,6 +200,66 @@ parse_artists <- function(html) {
   out
 }
 
+#' Parse a saved track page (track/<id>.html)
+#'
+#' A track page holds two tables, weekly (every charted week) and daily (the last 31 days), with one column per chart
+#' (`Global` plus about 40 countries). Each table starts with a `Total` row and a `Peak` row, followed by one row per chart
+#' date. A cell reads `position (streams)`. `--` means not on that chart that day, and those cells are left out, not
+#' stored as 0 (plan D7). One output row per filled cell. `row_type` is `date`, `total` (`streams` = the page's total on
+#' that chart) or `peak` (`position` = peak position, `streams` = streams at the peak). A cell that does not read as
+#' `position (streams)`, `position` or a bare number keeps its text in `cell_raw` and is flagged `cell_odd`.
+#' @param html Page text.
+#' @param track_id Spotify track id from the file name.
+#' @return Data frame, one row per filled cell.
+#' @keywords internal
+parse_track_page <- function(html, track_id) {
+  rd <- kworb_read_html(html); doc <- rd$doc
+  title <- regmatches(html, regexec("Title: ([^<\n]*)<br", html))[[1]]
+  ah <- xml2::xml_find_all(doc, "//div[@class='subcontainer'][span[@class='pagetitle']]/a[contains(@href, 'artist/')]")
+  a_ids <- paste(sub("^(.*/)?artist/([A-Za-z0-9]+)(_songs)?\\.html$", "\\2", xml2::xml_attr(ah, "href")), collapse = ";")
+  a_nms <- paste(xml2::xml_text(ah), collapse = ";")
+  one <- function(freq) {
+    tb <- xml2::xml_find_first(doc, sprintf("//div[@class='%s']/table", freq))
+    if (inherits(tb, "xml_missing")) return(NULL)
+    hdr <- trimws(xml2::xml_text(xml2::xml_find_all(tb, "(.//tr[th])[1]/th")))
+    if (!length(hdr) || hdr[1] != "Date") stop("track page ", freq, ": header changed. Got [", paste(hdr, collapse = "|"), "]")
+    if (length(hdr) == 1) return(NULL)   # no chart columns: a track new this week has a weekly table of Date / Total / Peak only (11 Nov)
+    rows <- xml2::xml_find_all(tb, ".//tr[td]")
+    nc <- xml2::xml_find_num(rows, "count(./td)")
+    if (rd$incomplete && length(rows)) { rows <- rows[-length(rows)]; nc <- nc[-length(nc)] }   # a cut copy: the last row cannot be trusted
+    if (any(nc != length(hdr))) stop("track page ", freq, ": a row has ", nc[nc != length(hdr)][1], " cells, not ", length(hdr))
+    td <- xml2::xml_find_all(rows, "./td")
+    txt <- matrix(trimws(xml2::xml_text(td)), ncol = length(hdr), byrow = TRUE)
+    p <- matrix(xml2::xml_text(xml2::xml_find_first(td, "./span[@class='p']")), ncol = length(hdr), byrow = TRUE)
+    s <- matrix(xml2::xml_text(xml2::xml_find_first(td, "./span[@class='s']")), ncol = length(hdr), byrow = TRUE)
+    lab <- txt[, 1]
+    rt <- ifelse(lab == "Total", "total", ifelse(lab == "Peak", "peak", ifelse(grepl("^[0-9]{4}/[0-9]{2}/[0-9]{2}$", lab), "date", "other")))
+    if (any(rt == "other")) stop("track page ", freq, ": a row label is not Total, Peak or a date: ", lab[rt == "other"][1])
+    out <- list()
+    for (j in seq_along(hdr)[-1]) {
+      v <- txt[, j]; keep <- nzchar(v) & v != "--"; if (!any(keep)) next
+      pj <- p[keep, j]; sj <- s[keep, j]; vj <- v[keep]
+      std <- !is.na(pj) & !is.na(sj) & vj == paste0(trimws(pj), " (", trimws(sj), ")")
+      bare <- is.na(pj) & is.na(sj) & grepl("^[0-9][0-9,]*$", vj)       # Total row: a plain number
+      ponly <- !is.na(pj) & is.na(sj) & vj == trimws(pj)                  # a position with no streams shown
+      r <- rt[keep]
+      pos <- ifelse(std | ponly, kworb_num(pj), NA_real_)
+      st <- ifelse(std, kworb_num(sj), ifelse(bare, kworb_num(vj), NA_real_))
+      odd <- !(std | bare | ponly)
+      out[[length(out) + 1]] <- data.frame(frequency = freq, row_type = r, country = tolower(hdr[j]),
+        chart_date = as.Date(ifelse(r == "date", lab[keep], NA_character_), format = "%Y/%m/%d"),
+        position = as.integer(pos), streams = st, cell_raw = ifelse(odd | bare, vj, NA_character_), cell_odd = odd, stringsAsFactors = FALSE)
+    }
+    if (!length(out)) return(NULL)
+    x <- do.call(rbind, out); x$page_truncated <- rd$incomplete || rd$cut; x
+  }
+  x <- rbind(one("weekly"), one("daily"))
+  if (is.null(x)) stop("track page ", track_id, ": no filled cells in either table")
+  x$track_id <- track_id; x$title <- if (length(title) == 2) trimws(xml2::xml_text(xml2::read_html(paste0("<p>", title[2], "</p>")))) else NA_character_
+  x$artist_ids <- a_ids; x$artist_names <- a_nms; x$layout <- "tp1"
+  x[order(x$frequency, x$row_type, x$country, x$chart_date), c("track_id", "title", "artist_ids", "artist_names", setdiff(names(x), c("track_id", "title", "artist_ids", "artist_names")))]
+}
+
 #' Parse one saved raw file
 #'
 #' Picks the parser from the file name (`<slug>__<UTC stamp>.html.gz`) and adds the request columns.
@@ -228,6 +288,8 @@ parse_raw_file <- function(path) {
     table <- if (nzchar(m[3])) "chart_totals" else "chart_entry"
   } else if (slug == "artists") {
     rows <- parse_artists(html); rows$snapshot_date <- as.Date(captured_at, tz = "UTC"); table <- "artist_snapshot"
+  } else if (grepl("^track-[A-Za-z0-9]{22}$", slug)) {
+    rows <- parse_track_page(html, sub("^track-", "", slug)); table <- "track_chart"
   } else return(list(table = NA_character_, rows = NULL))
   rows$captured_at <- format(captured_at, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"); rows$source <- if (wb) "wayback" else "live"
   rows$raw_file <- f; rows$parser_version <- kworb_parser_version()

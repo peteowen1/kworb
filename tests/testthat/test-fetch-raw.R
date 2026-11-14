@@ -96,3 +96,10 @@ test_that("country codes come from the index page links", {
 test_that("the index URL (trailing slash) gets a non-empty slug", {
   expect_equal(raw_slug("https://kworb.net/spotify/"), "index")
 })
+
+test_that("songs rotation: each artist has one fixed weekday and the days are balanced", {
+  expect_equal(kworb_weekday_of(c("06HL4z0CvFAxyc27GXpf02", "06HL4z0CvFAxyc27GXpf02")), rep(kworb_weekday_of("06HL4z0CvFAxyc27GXpf02"), 2))
+  expect_true(all(kworb_weekday_of(c("06HL4z0CvFAxyc27GXpf02", "3TVXtAsR1Inumwj472S9r4")) %in% 0:6))
+  set.seed(1); ids <- vapply(1:3000, function(i) paste(sample(c(letters, LETTERS, 0:9), 22, TRUE), collapse = ""), "")
+  n <- tabulate(kworb_weekday_of(ids) + 1L, 7); expect_equal(sum(n), 3000); expect_true(all(n > 350 & n < 510))
+})

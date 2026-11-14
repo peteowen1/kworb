@@ -222,3 +222,15 @@ parse_index_country_codes <- function(html) {
   m <- regmatches(html, gregexpr('href="country/[a-z0-9]+_daily\\.html"', html))[[1]]
   unique(sub('href="country/([a-z0-9]+)_daily\\.html"', "\\1", m))
 }
+
+#' Weekday slot of an artist in the songs-page rotation
+#'
+#' A fixed function of the id (h = (31 h + code) mod 7 over its characters), so an artist keeps its capture day while
+#' the artists list around it changes. capture_raw.R fetches the artists whose slot equals the capture date's day
+#' number mod 7.
+#' @param ids Character vector of Spotify artist ids.
+#' @return Integer vector, 0 to 6.
+#' @keywords internal
+kworb_weekday_of <- function(ids) {
+  vapply(ids, function(id) { h <- 0L; for (cp in utf8ToInt(id)) h <- (31L * h + cp) %% 7L; h }, integer(1), USE.NAMES = FALSE)
+}

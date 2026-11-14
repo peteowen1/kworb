@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     # capture: 82 requests + 200 track pages x 3 s, about 14 min (10 Nov); the month rebuild: about 0.4 min per day of captures (9 Nov), ~12 min by the 31st,
     # plus track pages (0.13 s each, 11 Nov: 200 a day, ~14 min by the 31st) when the parse cache below is missing
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     env:
       # Needs write access to peteowen1/mediadata (a repo-scoped PAT; the

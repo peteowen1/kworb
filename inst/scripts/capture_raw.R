@@ -13,7 +13,8 @@
 #
 # Environment: GH_TOKEN (needs write access to the mediadata repo; `gh` CLI),
 # MEDIADATA_REPO (default peteowen1/mediadata), KWORB_DELAY (default 3),
-# KWORB_RAW_ROOT (default tempdir), KWORB_SKIP_UPLOAD=1 to only capture, KWORB_TRACKS (default 200).
+# KWORB_RAW_ROOT (default tempdir), KWORB_SKIP_UPLOAD=1 to only capture, KWORB_TRACKS (default 200),
+# KWORB_SONGS (cap on artist songs pages; default none, 0 = no songs pages).
 
 suppressMessages(library(kworb))
 
@@ -119,11 +120,43 @@ if (n_tracks > 0 && !is.null(gd) && nrow(gd) == 1 && !stopped) {
   note("no track pages captured: today's global daily chart was not fetched")
 }   # after a STOP the stop note already fails the run
 
+# 2c. Artist songs pages (plan Stage 4, 14 Nov 2026): artist/<id>_songs.html holds the only true all-time stream count per
+# track (top 500 of each artist). Watchlist = every artist on today's artists.html (3,000) plus inst/extdata/
+# songs_watchlist_extra.csv (awards Grammy nominees not always in the 3,000). Each artist has a fixed weekday (a hash of its
+# id, so it keeps its day as the list changes) and is captured once a week: about 430 pages a day, 22 min at 3 s.
+# KWORB_SONGS caps the count (default: no cap; 0 = none).
+songs_cap <- suppressWarnings(as.integer(Sys.getenv("KWORB_SONGS", "100000"))); if (is.na(songs_cap)) songs_cap <- 100000L
+songs_on <- songs_cap > 0
+song_urls <- character()
+ar <- if (!is.null(man)) man[grepl("/artists\\.html$", man$url) & man$http_status %in% 200L, ] else NULL
+stopped <- file.exists(file.path(out_dir, "STOP"))
+if (songs_on && !is.null(ar) && nrow(ar) == 1 && !stopped) {
+  listed <- tryCatch({
+    con <- gzfile(file.path(out_dir, ar$file), "rb"); html <- rawToChar(readBin(con, "raw", 5e7)); close(con)
+    kworb:::parse_artists(html)$artist_id   # internal parser (not exported)
+  }, error = function(e) { note("could not read artist ids from artists.html: ", conditionMessage(e)); character() })
+  if (length(listed) < 2900) note("artists.html gave only ", length(listed), " artist ids (expected 3,000)")
+  xf <- system.file("extdata", "songs_watchlist_extra.csv", package = "kworb")
+  extra <- if (nzchar(xf)) utils::read.csv(xf, stringsAsFactors = FALSE)$artist_id else { note("songs_watchlist_extra.csv not found in the installed package"); character() }
+  ids <- unique(c(listed, extra)); ids <- ids[!is.na(ids) & grepl("^[0-9A-Za-z]{22}$", ids)]
+  wday <- as.integer(as.Date(format(started, "%Y-%m-%d", tz = "UTC"))) %% 7L
+  todays <- ids[kworb:::kworb_weekday_of(ids) == wday]
+  song_urls <- if (length(todays)) paste0(base, "artist/", head(todays, songs_cap), "_songs.html") else character()
+  message("Artist songs pages: ", length(song_urls), " of ", length(ids), " watchlist artists (weekday slot ", wday, ")")
+  sm <- if (length(song_urls)) fetch_raw_pages(song_urls, out_dir, delay = delay) else data.frame(url = character(), http_status = integer())
+  if (isTRUE(attr(sm, "stopped"))) note("artist songs pages stopped by HTTP 429/403; not attempted: ", length(attr(sm, "not_attempted")))
+  sbad <- sm[is.na(sm$http_status) | sm$http_status != 200L, ]
+  if (nrow(sbad)) message("artist songs pages not 200: ", nrow(sbad), " (", paste(head(basename(sbad$url), 5), collapse = ", "), ")")
+  if (nrow(sbad) > 10) note(nrow(sbad), " of ", length(song_urls), " artist songs pages failed")
+} else if (songs_on && !stopped) {
+  note("no artist songs pages captured: today's artists.html was not fetched")
+}
+
 # 3. Bundle: files + manifest in one tar.
 manifest <- utils::read.csv(file.path(out_dir, "manifest.csv"), stringsAsFactors = FALSE)
 message(sprintf("%d requests, %d ok", nrow(manifest), sum(manifest$http_status %in% 200L)))
-if (length(codes) && nrow(manifest) != length(urls) + 1L + length(track_urls)) {
-  note("manifest has ", nrow(manifest), " rows, expected ", length(urls) + 1L + length(track_urls))
+if (length(codes) && nrow(manifest) != length(urls) + 1L + length(track_urls) + length(song_urls)) {
+  note("manifest has ", nrow(manifest), " rows, expected ", length(urls) + 1L + length(track_urls) + length(song_urls))
 }
 tar_name <- paste0("kworb-raw-", run_ts, ".tar")
 man_name <- paste0("kworb-raw-manifest-", run_ts, ".csv")

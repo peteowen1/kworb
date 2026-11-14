@@ -201,7 +201,7 @@ TOT_COLS <- c("artist_id", "artist_name", "page_updated", "snapshot_date", "capt
   "song_rows", "song_table_truncated", "layout", "page_truncated", "source", "raw_file", "parser_version")
 SONG_COLS <- c("artist_id", "snapshot_date", "captured_at", "rank", "track_id", "title", "is_feature", "title_cell", "streams", "daily", "raw_file")
 check_songs <- function(x) {
-  why <- tryCatch({ assert_coverage(x, c("artist_id", "track_id", "captured_at"), c(track_id = 1, title = 1, streams = 1, artist_streams_total = 1, artist_tracks_total = 1), "artist_song_snapshot"); "" }   # daily not floored per page: one blank on a 20-song page would quarantine it (review); floored on the pooled table below, error = function(e) conditionMessage(e))
+  why <- tryCatch({ assert_coverage(x, c("artist_id", "track_id", "captured_at"), c(track_id = 1, title = 1, streams = 1, artist_streams_total = 1, artist_tracks_total = 1), "artist_song_snapshot"); "" }, error = function(e) conditionMessage(e))   # daily not floored per page: one blank on a 20-song page would quarantine it (review); floored on the pooled table below
   if (nzchar(why)) return(why)
   if (is.unsorted(rev(x$streams))) return("song streams are not highest first")
   if (!is.na(x$page_updated[1]) && x$page_updated[1] > as.Date(substr(x$captured_at[1], 1, 10))) return("page date after the capture")

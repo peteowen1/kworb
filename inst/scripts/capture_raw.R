@@ -143,6 +143,7 @@ if (songs_on && !is.null(ar) && nrow(ar) == 1 && !stopped) {
   todays <- ids[kworb:::kworb_weekday_of(ids) == wday]
   song_urls <- if (length(todays)) paste0(base, "artist/", head(todays, songs_cap), "_songs.html") else character()
   message("Artist songs pages: ", length(song_urls), " of ", length(ids), " watchlist artists (weekday slot ", wday, ")")
+  if (length(song_urls)) Sys.sleep(delay)   # fetch_raw_pages waits only between its own requests; keep 3 s after the last track page
   sm <- if (length(song_urls)) fetch_raw_pages(song_urls, out_dir, delay = delay) else data.frame(url = character(), http_status = integer())
   if (isTRUE(attr(sm, "stopped"))) note("artist songs pages stopped by HTTP 429/403; not attempted: ", length(attr(sm, "not_attempted")))
   sbad <- sm[is.na(sm$http_status) | sm$http_status != 200L, ]

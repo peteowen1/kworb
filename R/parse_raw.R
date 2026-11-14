@@ -8,7 +8,7 @@
 #' Parser version written on every parsed row
 #' @return Integer.
 #' @keywords internal
-kworb_parser_version <- function() 6L   # 6: track pages (track_chart / track_page_summary). 5: global weekly totals pages (chart_totals, frequency weekly; weeks / top10_weeks). 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
+kworb_parser_version <- function() 7L   # 7: artist songs pages (artist_totals / artist_song_snapshot). 6: track pages (track_chart / track_page_summary). 5: global weekly totals pages (chart_totals, frequency weekly; weeks / top10_weeks). 4: last row of a page with no </table> dropped, dates inside <strong>, weekly charts; 2 (9 Nov review): raw cells for top10_days, artists' as_lead / solo / as_feature; 3: page layouts back to 2016 (layout, era, page_pos, streams_raw, source)
 
 #' Number from a kworb cell
 #'
@@ -260,6 +260,53 @@ parse_track_page <- function(html, track_id) {
   x[order(x$frequency, x$row_type, x$country, x$chart_date), c("track_id", "title", "artist_ids", "artist_names", setdiff(names(x), c("track_id", "title", "artist_ids", "artist_names")))]
 }
 
+#' Parse a saved artist songs page (artist/<id>_songs.html)
+#'
+#' The page holds two tables. The first is the artist's totals: rows Streams, Daily and Tracks; columns Total, As lead, Solo
+#' and As feature (*). The second is one row per track, ordered by all-time streams: Song Title (a Spotify track link,
+#' prefixed `* ` for a featured credit), Streams and Daily, all exact integers. The song table stops at 500 rows while
+#' Tracks can be larger (Taylor Swift: 670), so `song_table_truncated` marks a page whose table is shorter than its Tracks
+#' total. One output row per song; the totals and the page's "Last updated" date are repeated on every row, and
+#' parse_raw.R splits them into `artist_totals` (one row per capture) and `artist_song_snapshot`. A blank cell is NA, not 0.
+#' @param html Page text.
+#' @param artist_id Spotify artist id from the file name.
+#' @return Data frame, one row per song.
+#' @keywords internal
+parse_artist_songs <- function(html, artist_id) {
+  rd <- kworb_read_html(html); doc <- rd$doc
+  tbs <- xml2::xml_find_all(doc, "//table")
+  if (length(tbs) != 2) stop("artist songs page ", artist_id, ": ", length(tbs), " tables, not 2 (totals and songs)")
+  hdr <- function(tb) trimws(xml2::xml_text(xml2::xml_find_all(tb, "(.//tr[th])[1]/th")))
+  h1 <- hdr(tbs[[1]]); h2 <- hdr(tbs[[2]])
+  if (!identical(h1, c("", "Total", "As lead", "Solo", "As feature (*)"))) stop("artist songs totals table: header changed. Got [", paste(h1, collapse = "|"), "]")
+  if (!identical(h2, c("Song Title", "Streams", "Daily"))) stop("artist songs table: header changed. Got [", paste(h2, collapse = "|"), "]")
+  # totals: a 3 x 5 grid, row labels Streams / Daily / Tracks
+  tr <- xml2::xml_find_all(tbs[[1]], ".//tr[td]")
+  g <- do.call(rbind, lapply(tr, function(r) trimws(xml2::xml_text(xml2::xml_find_all(r, "./td")))))
+  if (!identical(dim(g), c(3L, 5L)) || !identical(g[, 1], c("Streams", "Daily", "Tracks"))) stop("artist songs totals table: rows changed. Got [", paste(g[, 1], collapse = "|"), "]")
+  cn <- c(NA, "total", "as_lead", "solo", "as_feature")   # artist_streams_total, artist_daily_solo, artist_tracks_as_feature, ...
+  tot <- list(); for (i in 1:3) for (j in 2:5) tot[[paste0("artist_", tolower(g[i, 1]), "_", cn[j])]] <- kworb_num(g[i, j])
+  # songs
+  rows <- xml2::xml_find_all(tbs[[2]], ".//tr[td]")
+  nc <- xml2::xml_find_num(rows, "count(./td)")
+  if (rd$incomplete && length(rows)) { rows <- rows[-length(rows)]; nc <- nc[-length(nc)] }   # a cut copy: the last row cannot be trusted
+  if (any(nc != 3)) stop("artist songs table: a row has ", nc[nc != 3][1], " cells, not 3")
+  if (!length(rows)) stop("artist songs page ", artist_id, ": no song rows")
+  td <- xml2::xml_find_all(rows, "./td"); x <- matrix(trimws(xml2::xml_text(td)), ncol = 3, byrow = TRUE)
+  a <- xml2::xml_find_first(rows, "./td[1]//a")
+  href <- xml2::xml_attr(a, "href")
+  tid <- ifelse(grepl("/track/[A-Za-z0-9]{22}$", href), sub("^.*/track/", "", href), NA_character_)
+  updated <- regmatches(html, regexec("Last updated: ([0-9]{4}/[0-9]{2}/[0-9]{2})", html))[[1]]
+  pt <- trimws(xml2::xml_text(xml2::xml_find_first(doc, "//span[@class='pagetitle']/text()[1]")))
+  out <- data.frame(artist_id = artist_id, artist_name = sub(" - Spotify Top Songs.*$", "", pt), page_updated = as.Date(if (length(updated) == 2) updated[2] else NA_character_, format = "%Y/%m/%d"),
+                    rank = seq_along(rows), track_id = tid, title = xml2::xml_text(a), is_feature = startsWith(x[, 1], "*"), title_cell = x[, 1],
+                    streams = kworb_num(x[, 2]), daily = kworb_num(x[, 3]), stringsAsFactors = FALSE)
+  for (v in names(tot)) out[[v]] <- tot[[v]]
+  out$song_rows <- nrow(out); out$song_table_truncated <- !is.na(out$artist_tracks_total) & nrow(out) < out$artist_tracks_total
+  out$layout <- "s1"; out$page_truncated <- rd$incomplete || rd$cut
+  out
+}
+
 #' Parse one saved raw file
 #'
 #' Picks the parser from the file name (`<slug>__<UTC stamp>.html.gz`) and adds the request columns.
@@ -290,6 +337,8 @@ parse_raw_file <- function(path) {
     rows <- parse_artists(html); rows$snapshot_date <- as.Date(captured_at, tz = "UTC"); table <- "artist_snapshot"
   } else if (grepl("^track-[A-Za-z0-9]{22}$", slug)) {
     rows <- parse_track_page(html, sub("^track-", "", slug)); table <- "track_chart"
+  } else if (grepl("^artist-[A-Za-z0-9]{22}_songs$", slug)) {
+    rows <- parse_artist_songs(html, sub("^artist-([A-Za-z0-9]{22})_songs$", "\\1", slug)); rows$snapshot_date <- as.Date(captured_at, tz = "UTC"); table <- "artist_songs"
   } else return(list(table = NA_character_, rows = NULL))
   rows$captured_at <- format(captured_at, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"); rows$source <- if (wb) "wayback" else "live"
   rows$raw_file <- f; rows$parser_version <- kworb_parser_version()

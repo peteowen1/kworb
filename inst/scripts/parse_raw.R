@@ -14,6 +14,10 @@
 #                    first and last capture that showed the row, n_obs, and the position / streams of each. An as-of query
 #                    uses first_captured_at <= date and the *_first values. A row seen in two months is in both months'
 #                    files; take the earliest first_captured_at.   key track_id, frequency, country, chart_date
+#   artist_totals    artist songs pages (artist/<id>_songs.html, weekly rotation): the artist's Streams / Daily / Tracks totals,
+#                    Total, As lead, Solo, As feature; one row per capture.   key artist_id, captured_at
+#   artist_song_snapshot  the same pages' song tables: exact all-time streams and daily per track, top 500 by streams
+#                    (song_table_truncated on artist_totals when the artist has more tracks).   key artist_id, track_id, captured_at
 #   track_page_summary  the Total and Peak rows of every track page capture (Total grows daily, so every capture is kept)
 #                    key track_id, frequency, country, captured_at. The Global weekly Total is NOT the sum of the weekly rows
 #                    on 154 of 200 pages (11 Nov; always larger, median 5%): kept as the page states it.
@@ -31,7 +35,7 @@ if (!length(files)) stop("no raw files")
 # parsed: a rerun (or a run killed part way) reads them back instead of re-parsing (old artists pages hold 10,000 rows; the
 # 741 Wayback artists / totals copies took 9.5 min). A new parser version parses everything again.
 cache_dir <- file.path(db_dir, "_parsed"); dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
-TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_(daily|weekly)_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else if (grepl("^track-[A-Za-z0-9]{22}$", s)) "track_chart" else NA_character_ }
+TABLE_OF <- function(f) { s <- sub("__.*$", "", basename(f)); if (grepl("^country-[a-z]+_(daily|weekly)_totals$", s)) "chart_totals" else if (grepl("^country-[a-z]+_(daily|weekly)$", s)) "chart_entry" else if (s == "artists") "artist_snapshot" else if (grepl("^track-[A-Za-z0-9]{22}$", s)) "track_chart" else if (grepl("^artist-[A-Za-z0-9]{22}_songs$", s)) "artist_songs" else NA_character_ }
 parse_cached <- function(f) {
   cp <- file.path(cache_dir, paste0(sub("\\.html\\.gz$", "", basename(f)), "__v", kworb:::kworb_parser_version(), ".parquet"))
   if (file.exists(cp)) return(list(table = TABLE_OF(f), rows = as.data.frame(read_parquet(cp))))
@@ -39,6 +43,7 @@ parse_cached <- function(f) {
 # track pages (about 2,000 cells each, 200 a day) are parsed and collapsed a capture day at a time at the end, so a month of
 # them is never held in memory at once (12 million cells by the 31st)
 track_files <- files[grepl("^track-", basename(files))]; files <- setdiff(files, track_files)
+song_files <- files[grepl("^artist-[A-Za-z0-9]{22}_songs__", basename(files))]; files <- setdiff(files, song_files)   # artist songs pages: own section at the end
 t0 <- Sys.time(); res <- lapply(files, function(f) tryCatch(parse_cached(f), error = function(e) list(table = "ERROR", rows = NULL, error = conditionMessage(e), file = basename(f))))
 tab <- vapply(res, `[[`, "", "table")
 err <- res[tab %in% "ERROR"]
@@ -186,3 +191,42 @@ if (length(track_files)) {
   cat(format(Sys.time(), "%H:%M:%S"), "track pages:", n_ok, "of", length(track_files), "kept | track_chart", nrow(acc), "rows | track_page_summary", nrow(sm), "rows |",
       round(as.numeric(difftime(Sys.time(), t1, units = "mins")), 1), "min\n")
 } else cat("NOTE: no track pages in", raw_dir, "- track_chart / track_page_summary skipped\n")
+
+# ---- artist songs pages -> artist_totals (one row per capture) and artist_song_snapshot (one row per song per capture) ----
+# Per-capture checks, quarantined like the track pages (the run fails only if more than 5 pages of the newest day fail): every
+# song row has a track id, a title and streams; streams run highest first (the page's own order); the page date is not after
+# the capture; the artist totals are filled. A missing set is a note (the rotation may not have run).
+TOT_COLS <- c("artist_id", "artist_name", "page_updated", "snapshot_date", "captured_at",
+  paste0("artist_", rep(c("streams", "daily", "tracks"), each = 4), "_", c("total", "as_lead", "solo", "as_feature")),
+  "song_rows", "song_table_truncated", "layout", "page_truncated", "source", "raw_file", "parser_version")
+SONG_COLS <- c("artist_id", "snapshot_date", "captured_at", "rank", "track_id", "title", "is_feature", "title_cell", "streams", "daily", "raw_file")
+check_songs <- function(x) {
+  why <- tryCatch({ assert_coverage(x, c("artist_id", "track_id", "captured_at"), c(track_id = 1, title = 1, streams = 1, daily = 0.99, artist_streams_total = 1, artist_tracks_total = 1), "artist_song_snapshot"); "" }, error = function(e) conditionMessage(e))
+  if (nzchar(why)) return(why)
+  if (is.unsorted(rev(x$streams))) return("song streams are not highest first")
+  if (!is.na(x$page_updated[1]) && x$page_updated[1] > as.Date(substr(x$captured_at[1], 1, 10))) return("page date after the capture")
+  if (sum(x$streams) > x$artist_streams_total[1] * 1.001) return("the songs add up to more than the artist's total")
+  "" }
+if (length(song_files)) {
+  t2 <- Sys.time(); tots <- list(); songs <- list(); squar <- list()
+  for (f in song_files) {
+    z <- tryCatch(parse_cached(f), error = function(e) list(table = "ERROR", error = conditionMessage(e)))
+    if (identical(z$table, "ERROR")) { message("PARSE ERROR ", basename(f), ": ", z$error)
+      squar[[length(squar) + 1]] <- data.frame(table = "artist_song_snapshot", raw_file = basename(f), captured_at = format(as.POSIXct(sub("^.*__([0-9]{8}T[0-9]{6}Z)\\.html\\.gz$", "\\1", basename(f)), format = "%Y%m%dT%H%M%SZ", tz = "UTC"), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"), reason = paste("parse error:", z$error)); next }
+    w <- check_songs(z$rows)
+    if (nzchar(w)) { squar[[length(squar) + 1]] <- data.frame(table = "artist_song_snapshot", raw_file = basename(f), captured_at = z$rows$captured_at[1], reason = w); next }
+    tots[[length(tots) + 1]] <- z$rows[1, TOT_COLS]; songs[[length(songs) + 1]] <- z$rows[, SONG_COLS]   # slim: the totals once per capture, not on every song
+  }
+  if (length(squar)) { q3 <- do.call(rbind, squar); write.csv(rbind(if (file.exists(qf)) read.csv(qf) else NULL, q3), qf, row.names = FALSE)
+    if (nzchar(Sys.getenv("GITHUB_ACTIONS"))) for (i in seq_len(nrow(q3))) cat(sprintf("::warning title=kworb capture quarantined::%s %s: %s\n", q3$table[i], q3$raw_file[i], q3$reason[i]))
+    cat("QUARANTINED", nrow(q3), "artist songs page(s):\n"); print(q3, row.names = FALSE)
+    newest <- max(substr(sub("^.*__([0-9]{8})T.*$", "\\1", basename(song_files)), 1, 8)); n_new <- sum(gsub("-", "", substr(q3$captured_at, 1, 10)) == newest)
+    if (n_new > 5) stop(n_new, " artist songs pages from the newest day (", newest, ") failed their checks: see above") }
+  if (!length(tots)) stop("no artist songs page passed its checks")
+  at <- do.call(rbind, tots); ss <- do.call(rbind, songs); rownames(at) <- rownames(ss) <- NULL
+  assert_coverage(at, c("artist_id", "captured_at"), c(artist_name = 1, artist_streams_total = 1, artist_tracks_total = 1, page_updated = 0.99), "artist_totals")
+  assert_coverage(ss, c("artist_id", "track_id", "captured_at"), c(track_id = 1, title = 1, streams = 1, daily = 0.99), "artist_song_snapshot")
+  write_month(at, "artist_totals", "snapshot_date"); write_month(ss, "artist_song_snapshot", "snapshot_date")
+  cat(format(Sys.time(), "%H:%M:%S"), "artist songs pages:", nrow(at), "of", length(song_files), "kept | artist_song_snapshot", nrow(ss), "rows |",
+      round(as.numeric(difftime(Sys.time(), t2, units = "mins")), 1), "min\n")
+} else cat("NOTE: no artist songs pages in", raw_dir, "- artist_totals / artist_song_snapshot skipped\n")

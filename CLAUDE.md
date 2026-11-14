@@ -46,6 +46,8 @@ inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / glob
   no page date: dated by capture), `track_chart` (track pages: one row per track x chart x date, collapsed over the month's
   captures with `first_captured_at` / `last_captured_at`, `n_obs` and first / last values; as-of uses `first_captured_at` and the
   `*_first` values) and `track_page_summary` (each track page capture's Total and Peak rows, every capture kept).
+  `artist_totals` and `artist_song_snapshot` (artist `_songs` pages, kworb#16: each watchlist artist once a week by
+  `kworb_weekday_of()`; exact all-time streams for an artist's top 500 tracks; `song_table_truncated` when it has more).
 - **Track pages:** the daily table is the last 31 ROWS (days the track charted anywhere), not the last 31 days, so it can reach
   back a year. Weekly dates are Sundays to 22 Mar 2015, Thursdays after. Weekly charts of 22 Mar - 30 Jul 2015 run past 200.
   The Global weekly Total is not the sum of the weekly rows (154 of 200 pages, 11 Nov): stored as the page states it.

@@ -203,5 +203,42 @@ test_that("parse_raw_file sends track-<id> files to track_chart", {
   con <- gzfile(f, "wb"); writeBin(charToRaw(track_page()), con); close(con)
   r <- parse_raw_file(f)
   expect_equal(r$table, "track_chart"); expect_equal(unique(r$rows$track_id), "003vvx7Niy0yvhvHt4a68B")
-  expect_equal(r$rows$captured_at[1], "2026-11-11T01:31:45Z"); expect_equal(r$rows$parser_version[1], 6L)
+  expect_equal(r$rows$captured_at[1], "2026-11-11T01:31:45Z"); expect_equal(r$rows$parser_version[1], kworb_parser_version())
+})
+
+# an artist songs page, cut down from artist/06HL4z0CvFAxyc27GXpf02_songs.html (14 Nov 2026): the same tags and headers,
+# totals table plus three songs, one a featured credit and one with a blank Daily cell
+songs_page <- function(tracks = "670", h2 = "<th>Daily</th>") paste0(
+  '<html><body><span class="pagetitle">Taylor Swift - Spotify Top Songs\n | <a href="/itunes/artist/taylorswift.html">Current charts</a>\n</span>',
+  '<br><br>Last updated: 2026/11/13<br><br><table style="width: 580px;"><thead><tr>\n<th class="text"></th>\n<th>Total</th>\n<th>As lead</th>\n<th>Solo</th>\n<th>As feature (*)</th>\n</tr></thead><tbody>',
+  '<tr><td class="text">Streams</td><td>133,408,538,165</td><td class="smaller">129,428,250,450</td><td class="smaller">118,491,227,479</td><td class="smaller">3,980,287,715</td></tr>',
+  '<tr><td class="text">Daily</td><td>43,734,802</td><td class="smaller">42,613,378</td><td class="smaller">39,692,827</td><td class="smaller">1,121,424</td></tr>',
+  '<tr><td class="text">Tracks</td><td>', tracks, '</td><td class="smaller">656</td><td class="smaller">588</td><td class="smaller">14</td></tr></tbody></table><br><br>',
+  '<table class="addpos sortable" style="width: 530px;"><thead><tr>\n<th class="text">Song Title</th>\n<th>Streams</th>\n', h2, '\n</tr></thead><tbody>',
+  '<tr><td class="text"><div><a href="https://open.spotify.com/track/1BxfuPKGuaTgP7aM0Bbdwr" target="_blank">Cruel Summer</a></div></td><td>3,536,065,840</td><td>757,165</td></tr>',
+  '<tr><td class="text"><div>* <a href="https://open.spotify.com/track/55n9yjI6qqXh5F2mYvUc2y" target="_blank">I Don’t Wanna Live Forever (Fifty Shades Darker)</a></div></td><td>2,237,257,706</td><td>630,111</td></tr>',
+  '<tr><td class="text"><div><a href="https://open.spotify.com/track/1Qicm51crXMvUuH4SMjobT" target="_blank">Style - Karaoke Version</a></div></td><td>1,018,238</td><td></td></tr>',
+  '</tbody></table></body></html>')
+
+test_that("artist songs page: totals grid, one row per song, featured credits, a blank Daily stays NA", {
+  x <- parse_artist_songs(songs_page(), "06HL4z0CvFAxyc27GXpf02")
+  expect_equal(nrow(x), 3); expect_equal(x$rank, 1:3); expect_equal(x$artist_name[1], "Taylor Swift"); expect_equal(x$page_updated[1], as.Date("2026-11-13"))
+  expect_equal(x$track_id, c("1BxfuPKGuaTgP7aM0Bbdwr", "55n9yjI6qqXh5F2mYvUc2y", "1Qicm51crXMvUuH4SMjobT"))
+  expect_equal(x$is_feature, c(FALSE, TRUE, FALSE)); expect_equal(x$title[2], "I Don’t Wanna Live Forever (Fifty Shades Darker)")
+  expect_equal(x$streams, c(3536065840, 2237257706, 1018238)); expect_equal(x$daily, c(757165, 630111, NA))
+  expect_equal(x$artist_streams_total[1], 133408538165); expect_equal(x$artist_daily_solo[1], 39692827); expect_equal(x$artist_tracks_as_feature[1], 14)
+  expect_true(all(x$song_table_truncated))                                   # 3 rows shown, 670 tracks
+  expect_false(any(parse_artist_songs(songs_page(tracks = "3"), "06HL4z0CvFAxyc27GXpf02")$song_table_truncated))
+})
+
+test_that("artist songs page: a changed header stops the parser", {
+  expect_error(parse_artist_songs(songs_page(h2 = "<th>Daily</th><th>Peak</th>"), "06HL4z0CvFAxyc27GXpf02"), "header changed")
+})
+
+test_that("parse_raw_file sends artist-<id>_songs files to artist_songs, dated by capture", {
+  d <- withr::local_tempdir(); f <- file.path(d, "artist-06HL4z0CvFAxyc27GXpf02_songs__20261114T022725Z.html.gz")
+  con <- gzfile(f, "wb"); writeBin(charToRaw(enc2utf8(songs_page())), con); close(con)
+  r <- parse_raw_file(f)
+  expect_equal(r$table, "artist_songs"); expect_equal(unique(r$rows$artist_id), "06HL4z0CvFAxyc27GXpf02")
+  expect_equal(r$rows$snapshot_date[1], as.Date("2026-11-14")); expect_equal(r$rows$source[1], "live")
 })

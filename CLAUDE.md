@@ -37,6 +37,8 @@ capture-raw.yml (daily 21:30 UTC, on master)
   inst/scripts/parse_raw.R     → parse_raw_file() per page → checks PER CAPTURE (bad captures → <db>/_quarantine.csv, the run
                                  fails only if the newest day's capture is bad; track pages: more than 5 bad on the newest day) → <db>/<table>/month=<capture month>/part.parquet
   inst/scripts/publish_db.R    → mediadata release kworb-db: <table>__YYYY-MM.parquet (sizes verified)
+inst/scripts/backfill_tracks.R  → one-off B6 (backfill-tracks.yml, dispatch only): track pages of every track on the global daily
+                                 chart since KWORB_SINCE (from the chart_totals `days` difference) → one tar into kworb-raw-YYYY-MM
 inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / global daily / weekly / daily totals → data/raw_wayback/
                                  (<slug>__wb<archive ts>.html.gz + manifest.csv); parsed to data/db_wayback, published as
                                  <table>__wayback__YYYY-MM.parquet (publish_db.R prefix 'wayback__') so the daily job never touches them

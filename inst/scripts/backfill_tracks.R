@@ -23,6 +23,7 @@ suppressMessages(library(kworb))
 
 repo <- Sys.getenv("MEDIADATA_REPO", "peteowen1/mediadata")
 since <- as.Date(Sys.getenv("KWORB_SINCE", "2025-10-01"))
+if (is.na(since)) stop("KWORB_SINCE is blank or not a YYYY-MM-DD date")
 delay <- as.numeric(Sys.getenv("KWORB_DELAY", "3"))
 root <- Sys.getenv("KWORB_RAW_ROOT", file.path(tempdir(), "kworb_raw"))
 skip_upload <- nzchar(Sys.getenv("KWORB_SKIP_UPLOAD"))
@@ -75,7 +76,8 @@ ids <- ids[!is.na(ids) & grepl("^[0-9A-Za-z]{22}$", ids)]
 message(sprintf("Totals %s (%d tracks) -> %s (%d tracks): %d charted in between (%d new); fetching %d",
                 old_d, nrow(old), new_d, nrow(new), length(ids), sum(is.na(m$days_old)), min(cap, length(ids))))
 if (length(ids) < 500) note("only ", length(ids), " tracks charted since ", old_d, " (expected about 1,300)")
-writeLines(ids, file.path(root, paste0("backfill-tracks-ids-", run_ts, ".txt")))
+ids_path <- file.path(root, paste0("backfill-tracks-ids-", run_ts, ".txt"))   # uploaded with the tar, so a partial run can be audited
+writeLines(ids, ids_path)
 
 # 2. Track pages.
 urls <- paste0(base, "track/", head(ids, cap), ".html")
@@ -106,7 +108,7 @@ if (skip_upload) {
                "--notes", shQuote("Raw kworb.net page captures (private). One tar plus manifest per run."), "--latest=false"))
     if (cr$rc != 0 && gh(c("release", "view", tag, "-R", repo))$rc != 0) note("could not create release ", tag)
   }
-  up <- gh(c("release", "upload", tag, shQuote(tar_path), shQuote(man_path), "-R", repo))
+  up <- gh(c("release", "upload", tag, shQuote(tar_path), shQuote(man_path), shQuote(ids_path), "-R", repo))
   if (up$rc != 0) note("upload failed: ", paste(up$out, collapse = " "))
   chk <- gh(c("release", "view", tag, "-R", repo, "--json", "assets", "--jq", shQuote(".assets[] | [.name, .size] | @tsv")))
   listed <- if (chk$rc == 0) utils::read.delim(text = chk$out, header = FALSE, col.names = c("name", "size")) else NULL

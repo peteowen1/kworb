@@ -226,7 +226,7 @@ Done means: tests green, `kworb_db_summary()` shows non-empty, correctly dated r
 
 **Stage 3: `as_of()` and Wayback backfill B1 to B4.** First consumer: swap awards 157's artist lookup for `kworb_asof()` and compare to its current output on the 59th to 68th ceremonies (differences should be exactly the leak cases in 2.2).
 
-**Stage 4: track-level.** (11 Nov 2026: track pages of the global top 200 captured daily since 10 Nov and parsed into `track_chart` / `track_page_summary` by `parse_raw.R`. 14 Nov: `_songs` weekly rotation of 3,000 listed artists + 17 awards extras, parsed into `artist_totals` / `artist_song_snapshot`, kworb#16. B6 / B7 backfills and the old scrape path still to do.) `_songs` rotation for the awards watchlist, track-page rotation, B6 and B7, `track_daily`/`track_weekly`. Retire the old package's scrape path, fix D2 and D12 or delete the functions it superseded.
+**Stage 4: track-level.** (11 Nov 2026: track pages of the global top 200 captured daily since 10 Nov and parsed into `track_chart` / `track_page_summary` by `parse_raw.R`. 14 Nov: `_songs` weekly rotation of 3,000 listed artists + 17 awards extras, parsed into `artist_totals` / `artist_song_snapshot`, kworb#16. 15 Nov: B7 is covered by that rotation (the same 3,000 live pages, each weekly); B6 scoped to recent tracks, `backfill_tracks.R`. The old scrape path still to do.) `_songs` rotation for the awards watchlist, track-page rotation, B6 and B7, `track_daily`/`track_weekly`. Retire the old package's scrape path, fix D2 and D12 or delete the functions it superseded.
 
 **Stage 5: housekeeping.** Remove the old `data` release (999 assets) after the new DB has the 151 chart files re-imported (they are the only record of Dec 2025 to Nov 2026 apart from Wayback), fix D18, `main` PR, projection models re-pointed at `kworb_asof()`.
 
@@ -235,7 +235,7 @@ Done means: tests green, `kworb_db_summary()` shows non-empty, correctly dated r
 ## 5. Decisions for Pete (listed first because they gate the build)
 1. **Where do raw pages live?** Private `mediadata` releases (recommended: third-party content, and `kworb` is a public repo) or the public `kworb` repo.
 2. **Delete the old `data` release (999 assets) now or after import?** Recommendation: import the 151 chart CSVs and 848 track CSVs into the new tables first (cheap), then delete.
-3. **Scope of watchlists** (artists and tracks): awards-only (1,500 artists) or all charted tracks (12,076)? Cost difference is Section 3.6 B6.
+3. **Scope of watchlists** (artists and tracks): awards-only (1,500 artists) or all charted tracks (12,076)? Cost difference is Section 3.6 B6. **Answered 15 Nov 2026 (Pete): recent only.** B6 fetches tracks on the global daily chart since 1 Oct 2025 (1,339 on 15 Nov, about 67 min), `inst/scripts/backfill_tracks.R` via `backfill-tracks.yml`. Artists: the `_songs` rotation already covers all 3,000 listed plus the awards extras (kworb#16).
 4. **Politeness**: 3 s per request and about 700 requests a day plus a one-off 20,000-request backfill. kworb's robots.txt allows all; there is no published rate limit that I could find. Worth a note to the site owner? (Unconfirmed: I did not look for contact details or terms of use.)
 
 ## 6. Not confirmed, and where I looked

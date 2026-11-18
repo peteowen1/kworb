@@ -15,58 +15,16 @@ library(dplyr)
 # 1. SETUP & DATA LOADING
 # =============================================================================
 
-# Configuration
-REPO <- "peteowen1/kworb"
-RELEASE_TAG <- "data"
+# One live request for a sample track (the old GitHub-release loaders were deleted 18 Nov 2026;
+# plan Stage 5 re-points this demo at kworb_asof())
+# Example: "All I Want for Christmas Is You" by Mariah Carey
+# Track ID: 0bYg9bo50gSsH3LtXe2SQn (a classic seasonal song)
+track_id <- "0bYg9bo50gSsH3LtXe2SQn"
 
-# Try to load from GitHub Releases first, fall back to scraping
-message("Attempting to load data from GitHub Releases...")
+message(sprintf("Scraping track history for %s...", track_id))
+history_raw <- scrape_track_history(track_id, view = "daily")
 
-release_files <- tryCatch({
-  list_release_files(REPO, RELEASE_TAG)
-}, error = function(e) {
-  message("Could not access releases: ", e$message)
-  tibble::tibble()
-})
-
-if (nrow(release_files) > 0) {
-  message(sprintf("Found %d files in release", nrow(release_files)))
-
-  # Load charts and tracks from release
-  charts <- load_charts_from_release(REPO, RELEASE_TAG)
-  tracks <- load_tracks_from_release(REPO, "all", RELEASE_TAG)
-
-  message(sprintf("Loaded %d chart rows, %d track history rows",
-                  nrow(charts), nrow(tracks)))
-
-  # Use the first track with sufficient history for analysis
-  if (nrow(tracks) > 0) {
-    track_counts <- tracks |>
-      group_by(track_id) |>
-      summarise(n_days = n_distinct(date), .groups = "drop") |>
-      arrange(desc(n_days))
-
-    # Pick track with most history
-    track_id <- track_counts$track_id[1]
-    history_raw <- tracks |> filter(track_id == !!track_id)
-    message(sprintf("Using track %s with %d days of history", track_id, nrow(history_raw)))
-  } else {
-    message("No track data in release, will scrape fresh data")
-    release_files <- tibble::tibble()  # Fall through to scraping
-  }
-}
-
-# If no release data, scrape a sample track
-if (nrow(release_files) == 0) {
-  # Example: "All I Want for Christmas Is You" by Mariah Carey
-  # Track ID: 0bYg9bo50gSsH3LtXe2SQn (a classic seasonal song)
-  track_id <- "0bYg9bo50gSsH3LtXe2SQn"
-
-  message(sprintf("Scraping track history for %s...", track_id))
-  history_raw <- scrape_track_history(track_id, view = "daily")
-
-  message(sprintf("Loaded %d rows of daily per-country data", nrow(history_raw)))
-}
+message(sprintf("Loaded %d rows of daily per-country data", nrow(history_raw)))
 
 # Show data structure
 head(history_raw)

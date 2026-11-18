@@ -24,8 +24,8 @@ and progress reporting.
 }
 \examples{
 \dontrun{
-# Get chart and scrape all tracks
-chart <- scrape_chart()
-histories <- scrape_all_tracks(chart$track_id[1:10])
+# Scrape the history of a few tracks
+ids <- c("53iuhJlwXhSER5J2IYYv1W", "0bYg9bo50gSsH3LtXe2SQn")
+histories <- scrape_all_tracks(ids)
 }
 }

@@ -14,6 +14,6 @@ Character vector of codes in page order.
 }
 \description{
 Reads the codes from the daily-chart links on \code{index_spotify.html} (the
-site lists 77, including \code{global}), instead of the fixed list in
-\code{\link[=get_country_codes]{get_country_codes()}}.
+site lists 77, including \code{global}), instead of the fixed list the retired
+\code{get_country_codes()} used to return.
 }

@@ -13,23 +13,23 @@ devtools::check()       # Full R CMD check
 
 ## Pipeline
 
+The live pipeline is the kworb database below (capture-raw.yml -> parse_raw.R -> publish_db.R). The old per-request scrape path
+(`scrape_chart()`, `save_*` / `upload_release_data()`, `daily-scrape.yml`) was deleted 18 Nov 2026 (plan Stage 4 / review item W12).
+What is left of the old package is the projection side, kept for the Stage 5 re-point at `kworb_asof()`:
+
 ```
-scrape_chart(country)            → snapshot of current chart (~200 tracks)
-scrape_track_history(track_id)   → per-country daily stream history
-  → save_chart_data() / save_track_history()  → local parquet
-  → upload_release_data()        → GitHub Releases (large datasets out of git)
-  → load_*_from_release()        → fetch back from releases
-  → aggregate_global_streams()   → roll per-country up to global daily series
-  → create_temporal_features()   → DOW / seasonal / monthly + rolling stats
-  → build_projection_model()     → forecast future streams
-  → predict_streams()            → apply
+scrape_track_history(track_id)   -> per-country daily stream history (one live request; polite_read_html)
+  -> aggregate_global_streams()  -> roll per-country up to global daily series
+  -> create_temporal_features()  -> DOW / seasonal / monthly + rolling stats
+  -> build_projection_model()    -> forecast future streams
+  -> predict_streams()           -> apply
 ```
 
-41 exports across 12 R files.
+23 exports across 9 R files.
 
 ## The kworb database (docs/plans/kworb-db.md) — the current path
 
-The old scrape pipeline above is mostly broken (plan section 1.1) and is being replaced in stages:
+The old scrape pipeline was mostly broken (plan section 1.1); it has been replaced stage by stage:
 
 ```
 capture-raw.yml (daily 21:30 UTC, on master)
@@ -68,45 +68,37 @@ inst/scripts/backfill_wayback.R → Wayback copies (one a day) of artists / glob
 
 | File | Purpose |
 |------|---------|
-| `scrape_chart.R` | `scrape_chart()`, `scrape_charts()` (multi-country), `get_country_codes()` — daily/weekly charts |
-| `scrape_track.R` | `scrape_track_history()`, `scrape_all_tracks()`, `get_track_metadata()`, `debug_track_page()` |
-| `data_releases.R` | GitHub Releases I/O: `upload_*`, `download_release_data()`, `list_release_files()`, `delete_release_files()` |
-| `data_storage.R` | Local persistence — `save_chart_data()`, `save_track_history()`, `load_chart_data()`, `load_track_history()`, `list_stored_tracks()`, `get_storage_summary()` |
-| `projection_models.R` | `calculate_rolling_stats()`, `aggregate_global_streams()`, `create_temporal_features()`, `add_yoy_features()`, `build_projection_model()`, `predict_streams()`, `evaluate_model()`, `prepare_model_features()` |
+| `scrape_track.R` | `scrape_track_history()`, `scrape_all_tracks()`, `get_track_metadata()`, `debug_track_page()` (live single requests, kept for the projection demo in `data-raw/`), plus `aggregate_global_streams()` |
+| `projection_models.R` | `calculate_rolling_stats()`, `create_temporal_features()`, `add_yoy_features()`, `build_projection_model()`, `predict_streams()`, `evaluate_model()`, `prepare_model_features()` |
 | `fetch_raw.R` | `fetch_raw()`, `fetch_raw_pages()`: one request, body saved untouched, manifest row, STOP on 429/403 (Stage 1) |
 | `parse_raw.R` | `parse_raw_file()` and the page parsers (every layout back to 2016), `assert_coverage()` (Stage 2-3) |
 | `db.R` | `kworb_db_summary()` |
 | `asof.R` | `kworb_artist_snapshots()` (load `artist_snapshot` from `data/db` + `data/db_wayback`), `kworb_asof()` (plan 3.4: an artist's total or window streams as of a day, strict on `captured_at`; method exact / last_before / interpolated / not_listed / missing; cut-off copies never read as "not listed") |
-| `utils.R` + `globals.R` + `zzz.R` | Helpers + NSE globals + onLoad |
+| `utils.R` + `globals.R` + `zzz.R` | Helpers (the string helpers are now used only by `scrape_track.R`) + NSE globals + onLoad |
 
 ## Data Persistence
 
-Two layers:
-- **Local parquet** via `data_storage.R` — `save_chart_data()` / `save_track_history()` write to a configurable directory. Prefer parquet/CSV over RDS (global rule from `~/.claude/CLAUDE.md`).
-- **GitHub Releases** via `data_releases.R` — the large per-track histories (~thousands of tracks) live in Releases, not git. `upload_release_data()` pushes the local store; `download_release_data()` mirrors it back.
+The database lives as parquet under `data/` and in the `mediadata` GitHub releases (`kworb-raw-YYYY-MM`, `kworb-db`); see the database section. The old `peteowen1/kworb` `data` release (999 assets, Dec 2025 to Nov 2026 chart files) is still up until plan Stage 5 re-imports it. Prefer parquet/CSV over RDS.
 
 ## Key Conventions
 
-- **Country codes** — `get_country_codes()` returns the canonical list kworb accepts. `"global"` is the default for chart scrapes; per-track history fans out across many countries automatically.
 - **`pos_change` is character** — kworb encodes chart movement as `"NEW"`, `"+5"`, `"-2"`, `"="`. Don't try to coerce to numeric without handling those tokens.
 - **`days` is cumulative chart tenure**, not streams. `streams_daily` / `streams_7day` / `streams_total` are the streaming columns.
 - **Rolling stats**: default windows are `c(7, 14, 30)` days. `calculate_rolling_stats()` requires the input sorted by date; it sorts defensively but the caller should still pass sorted data.
 - **`aggregate_global_streams()` collapses per-country → global daily** before projection. Always feed the aggregated series into `build_projection_model()`, not raw per-country.
 
-## Analysis Pattern
+## Analysis Pattern (projection demo, data-raw/stream_projections.R)
 
 ```r
 devtools::load_all()
-history  <- load_track_history("53iuhJlwXhSER5J2IYYv1W")  # Spotify track ID
+history  <- scrape_track_history("53iuhJlwXhSER5J2IYYv1W")  # one live request, per-country daily
 global   <- aggregate_global_streams(history)
-features <- create_temporal_features(global) |>
-            calculate_rolling_stats(windows = c(7, 30, 90)) |>
-            add_yoy_features()
-model    <- build_projection_model(features)
-predict_streams(model, horizon_days = 180)
+features <- create_temporal_features(global$date) # see the script for the full chain
 ```
+
+Plan Stage 5 re-points this at `kworb_asof()`.
 
 ## Data Locations
 
-- Local store: configurable (defaults to project-local). Inspect with `get_storage_summary()`.
-- Releases: `peteowen1/kworb` GitHub releases (managed via `data_releases.R`).
+- Local: `data/raw`, `data/raw_wayback`, `data/db`, `data/db_wayback` (gitignored). Releases: `mediadata` (private).
+

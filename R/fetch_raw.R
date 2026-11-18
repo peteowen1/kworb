@@ -212,8 +212,8 @@ fetch_raw_pages <- function(urls, out_dir, delay = 3, ..., sleep = Sys.sleep) {
 #' Country codes on kworb's own index page
 #'
 #' Reads the codes from the daily-chart links on `index_spotify.html` (the
-#' site lists 77, including `global`), instead of the fixed list in
-#' [get_country_codes()].
+#' site lists 77, including `global`), instead of the fixed list the retired
+#' `get_country_codes()` used to return.
 #'
 #' @param html Text of the index page.
 #' @return Character vector of codes in page order.

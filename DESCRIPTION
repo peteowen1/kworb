@@ -24,11 +24,9 @@ Imports:
     rvest (>= 1.0.0),
     xml2,
     httr (>= 1.4.0),
-    readr (>= 2.0.0),
     lubridate (>= 1.8.0),
     tibble (>= 3.0.0),
     purrr (>= 0.3.0),
-    piggyback (>= 0.1.5),
     digest
 Suggests:
     arrow,
